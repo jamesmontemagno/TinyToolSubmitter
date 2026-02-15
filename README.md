@@ -69,7 +69,7 @@ tiny-tool-submit [path-to-repo]
 	--readme <path>     Path to README file (skip auto-detection)
 	--headless          Skip interactive prompts, open URL directly
 	--model <name>      Copilot model to use (default: gpt-4.1)
-	--cli-path <path>   Path to Copilot CLI executable (default: copilot)
+	--cli-path <path>   Path to Copilot CLI executable (default: auto-detect on PATH, then copilot)
 	--verbose           Print Copilot CLI startup diagnostics
 ```
 

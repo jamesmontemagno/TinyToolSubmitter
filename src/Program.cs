@@ -128,12 +128,12 @@ CopilotSession? session = null;
 
 try
 {
-    var cliPath = string.IsNullOrWhiteSpace(flagCliPath) ? "copilot" : flagCliPath;
+    var (cliPath, cliPathSource) = ResolveCliPath(flagCliPath);
 
     if (verbose)
     {
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"   Copilot CLI path: {cliPath}");
+        Console.WriteLine($"   Copilot CLI path: {cliPath} ({cliPathSource})");
         Console.ResetColor();
     }
 
@@ -142,7 +142,7 @@ try
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"❌ Failed to execute GitHub Copilot CLI at '{cliPath}'.");
         Console.ResetColor();
-        if (string.Equals(cliPath, "copilot", StringComparison.OrdinalIgnoreCase))
+        if (cliPathSource is "detected" or "path")
             Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
         else
             Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
@@ -188,7 +188,7 @@ try
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"❌ GitHub Copilot CLI was not found at '{cliPath}'.");
         Console.ResetColor();
-        if (string.Equals(cliPath, "copilot", StringComparison.OrdinalIgnoreCase))
+        if (cliPathSource is "detected" or "path")
             Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
         else
             Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
@@ -203,7 +203,7 @@ try
         Console.WriteLine("   The Copilot CLI process started but disconnected before initialization completed.");
         Console.WriteLine("   Try: `copilot --version` and `copilot auth status` (or `copilot auth login` if needed). ");
         Console.WriteLine("   Run with `--verbose` for startup diagnostics.");
-        if (!string.Equals(cliPath, "copilot", StringComparison.OrdinalIgnoreCase))
+        if (cliPathSource == "argument")
             Console.WriteLine("   Also verify your --cli-path executable is the official Copilot CLI binary.");
         return 1;
     }
@@ -641,4 +641,44 @@ static bool TryRunProcess(string fileName, string arguments, out string standard
         exitCode = -1;
         return false;
     }
+}
+
+static (string Path, string Source) ResolveCliPath(string? explicitCliPath)
+{
+    if (!string.IsNullOrWhiteSpace(explicitCliPath))
+        return (explicitCliPath.Trim(), "argument");
+
+    var detectedCli = TryFindCopilotCliOnPath();
+    if (!string.IsNullOrWhiteSpace(detectedCli))
+        return (detectedCli, "detected");
+
+    return ("copilot", "path");
+}
+
+static string? TryFindCopilotCliOnPath()
+{
+    if (OperatingSystem.IsWindows())
+    {
+        if (TryRunProcess("where", "copilot", out var whereStdOut, out _, out var whereExitCode) && whereExitCode == 0)
+        {
+            var first = whereStdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(first))
+                return first;
+        }
+    }
+    else
+    {
+        if (TryRunProcess("which", "copilot", out var whichStdOut, out _, out var whichExitCode) && whichExitCode == 0)
+        {
+            var first = whichStdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(first))
+                return first;
+        }
+    }
+
+    return null;
 }
