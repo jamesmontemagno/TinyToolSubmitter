@@ -8,6 +8,7 @@ var flagArgs = args.Where(a => a.StartsWith("--") || a.StartsWith("-")).ToList()
 var positionalArgs = args.Where(a => !a.StartsWith("-")).ToList();
 
 var headless = flagArgs.Contains("--headless");
+var verbose = flagArgs.Contains("--verbose");
 
 string? flagReadmePath = null;
 string? flagModelName = null;
@@ -129,6 +130,50 @@ try
 {
     var cliPath = string.IsNullOrWhiteSpace(flagCliPath) ? "copilot" : flagCliPath;
 
+    if (verbose)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"   Copilot CLI path: {cliPath}");
+        Console.ResetColor();
+    }
+
+    if (!TryRunProcess(cliPath, "--version", out var versionStdOut, out var versionStdErr, out var versionExitCode))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"❌ Failed to execute GitHub Copilot CLI at '{cliPath}'.");
+        Console.ResetColor();
+        if (string.Equals(cliPath, "copilot", StringComparison.OrdinalIgnoreCase))
+            Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
+        else
+            Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
+        return 1;
+    }
+
+    if (versionExitCode != 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"❌ GitHub Copilot CLI returned a non-zero exit code for '--version' ({versionExitCode}).");
+        Console.ResetColor();
+        if (!string.IsNullOrWhiteSpace(versionStdErr))
+            Console.WriteLine($"   {versionStdErr}");
+        return 1;
+    }
+
+    if (verbose)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"   copilot --version: {versionStdOut}");
+        Console.ResetColor();
+
+        if (TryRunProcess(cliPath, "auth status", out var authStdOut, out var authStdErr, out var authExitCode))
+        {
+            var authText = !string.IsNullOrWhiteSpace(authStdOut) ? authStdOut : authStdErr;
+            Console.ForegroundColor = authExitCode == 0 ? ConsoleColor.DarkGray : ConsoleColor.Yellow;
+            Console.WriteLine($"   copilot auth status (exit {authExitCode}): {authText}");
+            Console.ResetColor();
+        }
+    }
+
     client = new CopilotClient(new CopilotClientOptions
     {
         CliPath = cliPath
@@ -148,6 +193,18 @@ try
         else
             Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
         Console.WriteLine("   Then run this tool again.");
+        return 1;
+    }
+    catch (Exception ex) when (IsCopilotConnectionLostError(ex))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("❌ Could not connect to GitHub Copilot CLI.");
+        Console.ResetColor();
+        Console.WriteLine("   The Copilot CLI process started but disconnected before initialization completed.");
+        Console.WriteLine("   Try: `copilot --version` and `copilot auth status` (or `copilot auth login` if needed). ");
+        Console.WriteLine("   Run with `--verbose` for startup diagnostics.");
+        if (!string.Equals(cliPath, "copilot", StringComparison.OrdinalIgnoreCase))
+            Console.WriteLine("   Also verify your --cli-path executable is the official Copilot CLI binary.");
         return 1;
     }
 
@@ -337,8 +394,28 @@ catch (Exception ex)
 }
 finally
 {
-    if (session != null) await session.DisposeAsync();
-    if (client != null) await client.DisposeAsync();
+    if (session != null)
+    {
+        try
+        {
+            await session.DisposeAsync();
+        }
+        catch
+        {
+        }
+    }
+
+    if (client != null)
+    {
+        try
+        {
+            await client.DisposeAsync();
+        }
+        catch
+        {
+        }
+    }
+
     Console.WriteLine("\n🛑 Done.");
 }
 
@@ -511,4 +588,57 @@ static bool IsCopilotCliMissingError(Exception ex)
     }
 
     return false;
+}
+
+static bool IsCopilotConnectionLostError(Exception ex)
+{
+    var current = ex;
+    while (current != null)
+    {
+        if (current.Message.Contains("Communication error with Copilot CLI", StringComparison.OrdinalIgnoreCase) ||
+            current.Message.Contains("JSON-RPC connection with the remote party was lost", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        current = current.InnerException!;
+    }
+
+    return false;
+}
+
+static bool TryRunProcess(string fileName, string arguments, out string standardOutput, out string standardError, out int exitCode)
+{
+    try
+    {
+        var processStartInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(processStartInfo);
+        if (process == null)
+        {
+            standardOutput = "";
+            standardError = "";
+            exitCode = -1;
+            return false;
+        }
+
+        standardOutput = process.StandardOutput.ReadToEnd().Trim();
+        standardError = process.StandardError.ReadToEnd().Trim();
+        process.WaitForExit();
+        exitCode = process.ExitCode;
+        return true;
+    }
+    catch
+    {
+        standardOutput = "";
+        standardError = "";
+        exitCode = -1;
+        return false;
+    }
 }
