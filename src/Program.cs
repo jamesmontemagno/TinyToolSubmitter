@@ -139,7 +139,7 @@ try
     }
     else if (headless)
     {
-        selectedModel = "gpt-5-mini";
+        selectedModel = "gpt-4.1";
     }
     else
     {
@@ -151,7 +151,7 @@ try
         if (models != null && models.Count > 0)
         {
             var defaultIndex = models.FindIndex(m =>
-                m.Id.Equals("gpt-5-mini", StringComparison.OrdinalIgnoreCase));
+                m.Id.Equals("gpt-4.1", StringComparison.OrdinalIgnoreCase));
             if (defaultIndex < 0) defaultIndex = 0;
 
             var orderedModels = models
@@ -174,7 +174,7 @@ try
         }
         else
         {
-            selectedModel = "gpt-5-mini";
+            selectedModel = "gpt-4.1";
         }
     }
 

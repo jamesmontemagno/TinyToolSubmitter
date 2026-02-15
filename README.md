@@ -67,7 +67,7 @@ Options:
 tiny-tool-submit [path-to-repo]
 	--readme <path>     Path to README file (skip auto-detection)
 	--headless          Skip interactive prompts, open URL directly
-	--model <name>      Copilot model to use (default: gpt-5-mini)
+	--model <name>      Copilot model to use (default: gpt-4.1)
 ```
 
 ## License
