@@ -2,6 +2,8 @@
 
 Standalone repo for the Tiny Tool Town submitter CLI.
 
+![TinyClips 2026-02-14 at 22 55 08](https://github.com/user-attachments/assets/a5f2e541-9b27-48d3-a369-a3d96ae5e5e0)
+
 ## Quick Start
 
 Prerequisites:
