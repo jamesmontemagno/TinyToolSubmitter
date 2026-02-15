@@ -10,6 +10,7 @@ Prerequisites:
 
 - .NET 10 SDK
 - GitHub Copilot access configured for the SDK call
+- GitHub Copilot CLI installed and available on PATH (`copilot`)
 
 Run directly with dnx:
 

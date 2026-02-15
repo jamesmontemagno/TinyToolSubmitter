@@ -125,8 +125,25 @@ CopilotSession? session = null;
 
 try
 {
-    client = new CopilotClient();
-    await client.StartAsync();
+    client = new CopilotClient(new CopilotClientOptions
+    {
+        CliPath = "copilot"
+    });
+
+    try
+    {
+        await client.StartAsync();
+    }
+    catch (Exception ex) when (IsCopilotCliMissingError(ex))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("❌ GitHub Copilot CLI was not found.");
+        Console.ResetColor();
+        Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
+        Console.WriteLine("   Then run this tool again.");
+        return 1;
+    }
+
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine("✅ Copilot client started");
     Console.ResetColor();
@@ -471,4 +488,20 @@ static void SetFieldValue(ToolMetadata metadata, string field, string value)
         case "language": metadata.Language = value; break;
         case "license": metadata.License = value; break;
     }
+}
+
+static bool IsCopilotCliMissingError(Exception ex)
+{
+    var current = ex;
+    while (current != null)
+    {
+        if (current.Message.Contains("Copilot CLI not found", StringComparison.OrdinalIgnoreCase) ||
+            current.Message.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase) ||
+            current.Message.Contains("cannot find the file", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        current = current.InnerException!;
+    }
+
+    return false;
 }
