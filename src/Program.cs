@@ -11,16 +11,18 @@ var headless = flagArgs.Contains("--headless");
 
 string? flagReadmePath = null;
 string? flagModelName = null;
+string? flagCliPath = null;
 for (int i = 0; i < args.Length - 1; i++)
 {
     if (args[i] == "--readme") flagReadmePath = args[i + 1];
     if (args[i] == "--model") flagModelName = args[i + 1];
+    if (args[i] == "--cli-path") flagCliPath = args[i + 1];
 }
 
 Console.ForegroundColor = ConsoleColor.Cyan;
 Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
-Console.WriteLine("║       Tiny Tool Town — Submission Helper 🏘️📋             ║");
-Console.WriteLine("║       Powered by GitHub Copilot SDK                        ║");
+Console.WriteLine("║       Tiny Tool Town — Submission Helper 🏘️📋                 ║");
+Console.WriteLine("║       Powered by GitHub Copilot SDK                          ║");
 Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
 Console.ResetColor();
 Console.WriteLine();
@@ -125,9 +127,11 @@ CopilotSession? session = null;
 
 try
 {
+    var cliPath = string.IsNullOrWhiteSpace(flagCliPath) ? "copilot" : flagCliPath;
+
     client = new CopilotClient(new CopilotClientOptions
     {
-        CliPath = "copilot"
+        CliPath = cliPath
     });
 
     try
@@ -137,9 +141,12 @@ try
     catch (Exception ex) when (IsCopilotCliMissingError(ex))
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("❌ GitHub Copilot CLI was not found.");
+        Console.WriteLine($"❌ GitHub Copilot CLI was not found at '{cliPath}'.");
         Console.ResetColor();
-        Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
+        if (string.Equals(cliPath, "copilot", StringComparison.OrdinalIgnoreCase))
+            Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
+        else
+            Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
         Console.WriteLine("   Then run this tool again.");
         return 1;
     }
