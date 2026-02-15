@@ -77,30 +77,65 @@ public static class RepoDetector
             if (!File.Exists(path)) continue;
 
             var content = File.ReadAllText(path);
-            if (content.Contains("MIT License", StringComparison.OrdinalIgnoreCase))
-                return "MIT";
-            if (content.Contains("Apache License", StringComparison.OrdinalIgnoreCase))
-                return "Apache-2.0";
-            if (content.Contains("GNU GENERAL PUBLIC LICENSE", StringComparison.OrdinalIgnoreCase))
-            {
-                if (content.Contains("Version 3", StringComparison.OrdinalIgnoreCase))
-                    return "GPL-3.0";
-                if (content.Contains("Version 2", StringComparison.OrdinalIgnoreCase))
-                    return "GPL-2.0";
-            }
-            if (content.Contains("BSD 2-Clause", StringComparison.OrdinalIgnoreCase))
-                return "BSD-2-Clause";
-            if (content.Contains("BSD 3-Clause", StringComparison.OrdinalIgnoreCase))
-                return "BSD-3-Clause";
-            if (content.Contains("Mozilla Public License", StringComparison.OrdinalIgnoreCase))
-                return "MPL-2.0";
-            if (content.Contains("ISC License", StringComparison.OrdinalIgnoreCase))
-                return "ISC";
-            if (content.Contains("The Unlicense", StringComparison.OrdinalIgnoreCase))
-                return "Unlicense";
+            var detectedFromLicenseFile = DetectLicenseFromText(content);
+            if (detectedFromLicenseFile != null)
+                return detectedFromLicenseFile;
 
             return "Unknown";
         }
+
+        // Fallback: some projects only mention license in README.
+        var readmePath = FindReadme(directory);
+        if (!string.IsNullOrWhiteSpace(readmePath) && File.Exists(readmePath))
+        {
+            var readmeContent = File.ReadAllText(readmePath);
+            var detectedFromReadme = DetectLicenseFromText(readmeContent);
+            if (detectedFromReadme != null)
+                return detectedFromReadme;
+        }
+
+        return null;
+    }
+
+    private static string? DetectLicenseFromText(string content)
+    {
+        if (content.Contains("MIT License", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("licensed under the mit", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("license: mit", StringComparison.OrdinalIgnoreCase))
+            return "MIT";
+
+        if (content.Contains("Apache License", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("Apache-2.0", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("license: apache", StringComparison.OrdinalIgnoreCase))
+            return "Apache-2.0";
+
+        if (content.Contains("GNU GENERAL PUBLIC LICENSE", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("GPL-3.0", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("GPLv3", StringComparison.OrdinalIgnoreCase))
+            return "GPL-3.0";
+
+        if (content.Contains("GPL-2.0", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("GPLv2", StringComparison.OrdinalIgnoreCase))
+            return "GPL-2.0";
+
+        if (content.Contains("BSD 2-Clause", StringComparison.OrdinalIgnoreCase))
+            return "BSD-2-Clause";
+
+        if (content.Contains("BSD 3-Clause", StringComparison.OrdinalIgnoreCase))
+            return "BSD-3-Clause";
+
+        if (content.Contains("Mozilla Public License", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("MPL-2.0", StringComparison.OrdinalIgnoreCase))
+            return "MPL-2.0";
+
+        if (content.Contains("ISC License", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("license: isc", StringComparison.OrdinalIgnoreCase))
+            return "ISC";
+
+        if (content.Contains("The Unlicense", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("unlicense", StringComparison.OrdinalIgnoreCase))
+            return "Unlicense";
+
         return null;
     }
 
