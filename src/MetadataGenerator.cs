@@ -1,4 +1,6 @@
 using GitHub.Copilot.SDK;
+using System.Text;
+using System.Text.Json;
 
 namespace TinyToolSubmitter;
 
@@ -27,33 +29,78 @@ public static class MetadataGenerator
     public static async Task<ToolMetadata?> GenerateAsync(
         CopilotSession session, string readmeContent, string repoName)
     {
-        var prompt = $"""
-            You are an assistant that extracts metadata from a GitHub repository README for submission 
-            to "Tiny Tool Town" — a curated collection of small, delightful open source tools.
+                var prompt = $@"You extract metadata from a GitHub README for Tiny Tool Town.
 
-            Analyze the following README and extract/generate the metadata below.
-            Respond EXACTLY in this format (one field per line, field name followed by colon and value):
+Return ONLY valid JSON (no markdown, no code fences) with this exact schema:
+{{
+    ""name"": ""string"",
+    ""tagline"": ""string <= 100 chars"",
+    ""description"": ""string, 2-4 sentences"",
+    ""tags"": [""lowercase-tag"", ""another-tag"", ""3-6 tags total""]
+}}
 
-            NAME: The tool's name (concise, title-case)
-            TAGLINE: A short, fun one-line description of what the tool does (under 100 chars)
-            DESCRIPTION: A 2-4 sentence enthusiastic description of what it does, why it's great, and why it's delightful. Be conversational and fun.
-            TAGS: Comma-separated lowercase tags relevant to the tool (3-6 tags, e.g. cli, windows, productivity)
+Rules:
+- Name must match the tool name from README; do not invent a different product.
+- Tagline must be concise and clear.
+- Description should be enthusiastic but honest.
+- Tags must be lowercase, relevant, and contain 3-6 entries.
 
-            Rules:
-            - NAME should be the actual tool name from the README, not made up
-            - TAGLINE should be catchy and concise — think app store subtitle
-            - DESCRIPTION should be enthusiastic but honest about what the tool does
-            - TAGS should be relevant lowercase keywords, comma-separated
-            - Do NOT wrap values in quotes
-            - Each field must be on a single line
+Repository name: {repoName}
 
-            Repository name: {repoName}
+README content:
+{readmeContent}";
 
-            README content:
-            {readmeContent}
-            """;
+        var raw = await SendPromptAsync(session, prompt);
+        var metadata = ParseResponse(raw);
+        if (metadata == null)
+            return null;
 
-        var result = new System.Text.StringBuilder();
+        NormalizeGeneratedFields(metadata);
+
+        if (HasGeneratedFieldIssues(metadata, out var issues))
+        {
+            var repairPrompt = $"""
+                Fix this metadata JSON so it satisfies ALL constraints.
+                Return ONLY valid JSON with keys: name, tagline, description, tags.
+
+                Constraints:
+                - name: non-empty
+                - tagline: non-empty and <= 100 characters
+                - description: non-empty, 2-4 sentences
+                - tags: array of 3-6 lowercase, relevant tags
+
+                Issues found:
+                {string.Join("; ", issues)}
+
+                Current JSON:
+                {JsonSerializer.Serialize(new
+                {
+                    name = metadata.Name,
+                    tagline = metadata.Tagline,
+                    description = metadata.Description,
+                    tags = metadata.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                })}
+                """;
+
+            var repairedRaw = await SendPromptAsync(session, repairPrompt);
+            var repaired = ParseResponse(repairedRaw);
+            if (repaired != null)
+            {
+                NormalizeGeneratedFields(repaired);
+                if (!HasGeneratedFieldIssues(repaired, out _))
+                    metadata = repaired;
+            }
+        }
+
+        ApplyFallbacks(metadata, repoName);
+        NormalizeGeneratedFields(metadata);
+
+        return metadata;
+    }
+
+    private static async Task<string> SendPromptAsync(CopilotSession session, string prompt)
+    {
+        var result = new StringBuilder();
         var done = new TaskCompletionSource();
 
         var subscription = session.On(evt =>
@@ -89,31 +136,140 @@ public static class MetadataGenerator
             subscription.Dispose();
         }
 
-        var raw = result.ToString().Trim();
+        return result.ToString().Trim();
+    }
+
+    private static ToolMetadata? ParseResponse(string raw)
+    {
         if (string.IsNullOrWhiteSpace(raw))
             return null;
 
-        return ParseResponse(raw);
+        try
+        {
+            var json = ExtractJsonObject(raw);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            string tagsValue = "";
+            if (TryGetProperty(root, "tags", out var tagsElement))
+            {
+                if (tagsElement.ValueKind == JsonValueKind.Array)
+                {
+                    tagsValue = string.Join(", ", tagsElement.EnumerateArray()
+                        .Where(item => item.ValueKind == JsonValueKind.String)
+                        .Select(item => item.GetString())
+                        .Where(value => !string.IsNullOrWhiteSpace(value))!);
+                }
+                else if (tagsElement.ValueKind == JsonValueKind.String)
+                {
+                    tagsValue = tagsElement.GetString() ?? "";
+                }
+            }
+
+            return new ToolMetadata
+            {
+                Name = GetString(root, "name"),
+                Tagline = GetString(root, "tagline"),
+                Description = GetString(root, "description"),
+                Tags = tagsValue
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
-    private static ToolMetadata ParseResponse(string raw)
+    private static string ExtractJsonObject(string raw)
     {
-        var metadata = new ToolMetadata();
-        var lines = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var start = raw.IndexOf('{');
+        var end = raw.LastIndexOf('}');
+        return start >= 0 && end > start
+            ? raw[start..(end + 1)]
+            : raw;
+    }
 
-        foreach (var line in lines)
+    private static string GetString(JsonElement root, string propertyName)
+    {
+        return TryGetProperty(root, propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()?.Trim() ?? ""
+            : "";
+    }
+
+    private static bool TryGetProperty(JsonElement root, string propertyName, out JsonElement value)
+    {
+        foreach (var property in root.EnumerateObject())
         {
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith("NAME:", StringComparison.OrdinalIgnoreCase))
-                metadata.Name = trimmed["NAME:".Length..].Trim();
-            else if (trimmed.StartsWith("TAGLINE:", StringComparison.OrdinalIgnoreCase))
-                metadata.Tagline = trimmed["TAGLINE:".Length..].Trim();
-            else if (trimmed.StartsWith("DESCRIPTION:", StringComparison.OrdinalIgnoreCase))
-                metadata.Description = trimmed["DESCRIPTION:".Length..].Trim();
-            else if (trimmed.StartsWith("TAGS:", StringComparison.OrdinalIgnoreCase))
-                metadata.Tags = trimmed["TAGS:".Length..].Trim();
+            if (property.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
         }
 
-        return metadata;
+        value = default;
+        return false;
+    }
+
+    private static void NormalizeGeneratedFields(ToolMetadata metadata)
+    {
+        metadata.Name = metadata.Name.Trim();
+        metadata.Tagline = metadata.Tagline.Trim();
+        metadata.Description = metadata.Description.Trim();
+
+        var tags = metadata.Tags
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(tag => tag.ToLowerInvariant())
+            .Distinct()
+            .ToList();
+
+        metadata.Tags = string.Join(", ", tags);
+    }
+
+    private static bool HasGeneratedFieldIssues(ToolMetadata metadata, out List<string> issues)
+    {
+        issues = [];
+
+        if (string.IsNullOrWhiteSpace(metadata.Name))
+            issues.Add("name is missing");
+
+        if (string.IsNullOrWhiteSpace(metadata.Tagline))
+            issues.Add("tagline is missing");
+        else if (metadata.Tagline.Length > 100)
+            issues.Add("tagline exceeds 100 characters");
+
+        if (string.IsNullOrWhiteSpace(metadata.Description))
+            issues.Add("description is missing");
+
+        var tags = metadata.Tags
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        if (tags.Count < 3 || tags.Count > 6)
+            issues.Add("tags must contain 3 to 6 entries");
+
+        if (tags.Any(t => t != t.ToLowerInvariant()))
+            issues.Add("tags must be lowercase");
+
+        return issues.Count > 0;
+    }
+
+    private static void ApplyFallbacks(ToolMetadata metadata, string repoName)
+    {
+        if (string.IsNullOrWhiteSpace(metadata.Name))
+            metadata.Name = repoName;
+
+        if (string.IsNullOrWhiteSpace(metadata.Tagline))
+            metadata.Tagline = $"A tiny tool called {repoName}.";
+
+        if (metadata.Tagline.Length > 100)
+            metadata.Tagline = metadata.Tagline[..100].TrimEnd();
+
+        if (string.IsNullOrWhiteSpace(metadata.Description))
+            metadata.Description = $"{repoName} is a helpful open source tool from this repository.";
+
+        if (string.IsNullOrWhiteSpace(metadata.Tags))
+            metadata.Tags = "cli, developer-tools, productivity";
+
     }
 }

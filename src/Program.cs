@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using GitHub.Copilot.SDK;
+using Spectre.Console;
 using TinyToolSubmitter;
 
 // --- Parse CLI flags ---
@@ -51,24 +52,27 @@ else
     if (detected != null)
     {
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"📄 Found README: {Path.GetFileName(detected)}");
+        Console.WriteLine($"📄 Found README: {Path.GetRelativePath(repoDir, detected)}");
         Console.ResetColor();
-        readmePath = detected;
+
+        if (headless)
+        {
+            readmePath = detected;
+        }
+        else
+        {
+            var useDetected = AnsiConsole.Confirm("Use this README?", true);
+            readmePath = useDetected
+                ? detected
+                : PromptForReadmePath(repoDir);
+        }
     }
     else if (!headless)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.Write("📄 No README found. Enter path to README: ");
+        Console.WriteLine("📄 No README found automatically. Let's pick one.");
         Console.ResetColor();
-        var input = Console.ReadLine()?.Trim();
-        if (string.IsNullOrEmpty(input) || !File.Exists(input))
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("❌ Invalid path. Exiting.");
-            Console.ResetColor();
-            return 1;
-        }
-        readmePath = Path.GetFullPath(input);
+        readmePath = PromptForReadmePath(repoDir);
     }
     else
     {
@@ -150,22 +154,23 @@ try
                 m.Id.Equals("gpt-5-mini", StringComparison.OrdinalIgnoreCase));
             if (defaultIndex < 0) defaultIndex = 0;
 
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("\n🤖 Select a model:");
-            Console.ResetColor();
+            var orderedModels = models
+                .Select((model, index) => new { Model = model, IsDefault = index == defaultIndex })
+                .OrderByDescending(item => item.IsDefault)
+                .ToList();
 
-            for (int i = 0; i < models.Count; i++)
-            {
-                var isDefault = i == defaultIndex ? " (default)" : "";
-                Console.WriteLine($"   {i + 1}. {models[i].Name}{isDefault}");
-            }
+            var labels = orderedModels
+                .Select(item => item.IsDefault ? $"{item.Model.Name} (recommended)" : item.Model.Name)
+                .ToList();
 
-            Console.Write($"\nEnter choice (1-{models.Count}) [default: {defaultIndex + 1}]: ");
-            var modelChoice = Console.ReadLine()?.Trim();
-            if (string.IsNullOrEmpty(modelChoice) || !int.TryParse(modelChoice, out var mIdx) || mIdx < 1 || mIdx > models.Count)
-                mIdx = defaultIndex + 1;
+            var selectedLabel = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[yellow]🤖 Select a model[/]")
+                    .PageSize(10)
+                    .AddChoices(labels));
 
-            selectedModel = models[mIdx - 1].Id;
+            var selectedIndex = labels.FindIndex(label => label == selectedLabel);
+            selectedModel = orderedModels[selectedIndex].Model.Id;
         }
         else
         {
@@ -181,11 +186,23 @@ try
         Streaming = true
     });
 
-    Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.WriteLine("   Analyzing README with AI...");
-    Console.ResetColor();
-
-    var metadata = await MetadataGenerator.GenerateAsync(session, readmeContent, repoName);
+    ToolMetadata? metadata;
+    if (headless)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("   Analyzing README with AI...");
+        Console.ResetColor();
+        metadata = await MetadataGenerator.GenerateAsync(session, readmeContent, repoName);
+    }
+    else
+    {
+        metadata = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync("[grey]Analyzing README with AI...[/]", async _ =>
+            {
+                return await MetadataGenerator.GenerateAsync(session, readmeContent, repoName);
+            });
+    }
 
     if (metadata == null)
     {
@@ -203,66 +220,43 @@ try
     metadata.AuthorGitHub = authorGitHub ?? "";
 
     // --- Step 4: Review metadata ---
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("\n═══════════════════════════════════════════════");
-    Console.WriteLine("  📋 Generated Submission Metadata");
-    Console.WriteLine("═══════════════════════════════════════════════");
-    Console.ResetColor();
-
-    DisplayField("Tool Name", metadata.Name);
-    DisplayField("Tagline", metadata.Tagline);
-    DisplayField("Description", metadata.Description);
-    DisplayField("GitHub URL", metadata.GitHubUrl);
-    DisplayField("Website", metadata.WebsiteUrl ?? "(none)");
-    DisplayField("Author", metadata.Author);
-    DisplayField("GitHub User", metadata.AuthorGitHub);
-    DisplayField("Tags", metadata.Tags);
-    DisplayField("Language", metadata.Language ?? "(not detected)");
-    DisplayField("License", metadata.License ?? "(not detected)");
-
-    Console.WriteLine();
+    AnsiConsole.Write(new Rule("[cyan]📋 Generated Submission Metadata[/]"));
+    RenderMetadataTable(metadata);
 
     if (!headless)
     {
-        // Allow editing
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("✏️  Would you like to edit any fields before submitting?");
-        Console.ResetColor();
-        Console.WriteLine("   Press Enter to accept, or type a field name to edit");
-        Console.WriteLine("   (name, tagline, description, github_url, website, author, author_github, tags, language, license)");
-        Console.WriteLine();
-
         while (true)
         {
-            Console.Write("   Edit field (or Enter to continue): ");
-            var field = Console.ReadLine()?.Trim().ToLowerInvariant();
-            if (string.IsNullOrEmpty(field)) break;
+            var fieldChoice = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[yellow]✏️  Edit metadata fields[/] (choose [green]Done[/] to continue)")
+                    .PageSize(12)
+                    .AddChoices([
+                        "Done",
+                        "name",
+                        "tagline",
+                        "description",
+                        "github_url",
+                        "website",
+                        "author",
+                        "author_github",
+                        "tags",
+                        "language",
+                        "license"
+                    ]));
 
-            Console.Write("   New value: ");
-            var newValue = Console.ReadLine()?.Trim() ?? "";
+            if (fieldChoice == "Done")
+                break;
 
-            switch (field)
-            {
-                case "name": metadata.Name = newValue; break;
-                case "tagline": metadata.Tagline = newValue; break;
-                case "description": metadata.Description = newValue; break;
-                case "github_url": metadata.GitHubUrl = newValue; break;
-                case "website": metadata.WebsiteUrl = newValue; break;
-                case "author": metadata.Author = newValue; break;
-                case "author_github": metadata.AuthorGitHub = newValue; break;
-                case "tags": metadata.Tags = newValue; break;
-                case "language": metadata.Language = newValue; break;
-                case "license": metadata.License = newValue; break;
-                default:
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"   Unknown field: {field}");
-                    Console.ResetColor();
-                    continue;
-            }
+            var currentValue = GetFieldValue(metadata, fieldChoice);
+            var newValue = AnsiConsole.Prompt(
+                new TextPrompt<string>($"New value for [green]{fieldChoice}[/]")
+                    .DefaultValue(currentValue));
 
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"   ✅ Updated {field}");
-            Console.ResetColor();
+            SetFieldValue(metadata, fieldChoice, newValue.Trim());
+
+            AnsiConsole.MarkupLine($"[green]✅ Updated {fieldChoice}[/]");
+            RenderMetadataTable(metadata);
         }
     }
 
@@ -301,6 +295,13 @@ try
     Console.WriteLine("\n🏘️  Thanks for submitting to Tiny Tool Town!");
     return 0;
 }
+catch (OperationCanceledException)
+{
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("\n⚠️ Cancelled by user.");
+    Console.ResetColor();
+    return 0;
+}
 catch (Exception ex)
 {
     Console.ForegroundColor = ConsoleColor.Red;
@@ -317,12 +318,25 @@ finally
     Console.WriteLine("\n🛑 Done.");
 }
 
-static void DisplayField(string label, string value)
+static void RenderMetadataTable(ToolMetadata metadata)
 {
-    Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.Write($"   {label,-14} ");
-    Console.ResetColor();
-    Console.WriteLine(value);
+    var table = new Table()
+        .RoundedBorder()
+        .AddColumn("[yellow]Field[/]")
+        .AddColumn("[yellow]Value[/]");
+
+    table.AddRow("Tool Name", metadata.Name);
+    table.AddRow("Tagline", metadata.Tagline);
+    table.AddRow("Description", metadata.Description);
+    table.AddRow("GitHub URL", metadata.GitHubUrl);
+    table.AddRow("Website", metadata.WebsiteUrl ?? "(none)");
+    table.AddRow("Author", metadata.Author);
+    table.AddRow("GitHub User", metadata.AuthorGitHub);
+    table.AddRow("Tags", metadata.Tags);
+    table.AddRow("Language", metadata.Language ?? "(not detected)");
+    table.AddRow("License", metadata.License ?? "(not detected)");
+
+    AnsiConsole.Write(table);
 }
 
 static void OpenUrl(string url)
@@ -339,5 +353,122 @@ static void OpenUrl(string url)
     catch
     {
         // Silently fail — URL is already printed
+    }
+}
+
+static string PromptForReadmePath(string repoDir)
+{
+    var currentDir = repoDir;
+
+    while (true)
+    {
+        var relativeCurrentDir = Path.GetRelativePath(repoDir, currentDir);
+        var currentDirDisplay = string.IsNullOrEmpty(relativeCurrentDir) ? "." : relativeCurrentDir;
+
+        var readmeCandidates = Directory
+            .EnumerateFiles(currentDir)
+            .Where(IsReadmeCandidate)
+            .OrderBy(Path.GetFileName)
+            .ToList();
+
+        var subDirectories = Directory
+            .EnumerateDirectories(currentDir)
+            .Where(d => !string.Equals(Path.GetFileName(d), ".git", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(Path.GetFileName)
+            .ToList();
+
+        var prompt = new SelectionPrompt<string>();
+        prompt.Title($"Select README in [green]{currentDirDisplay}[/] or browse:");
+        prompt.PageSize(15);
+        prompt.AddChoice("✍ Enter full path manually");
+        prompt.AddChoices(readmeCandidates.Select(f => $"📄 {Path.GetFileName(f)}"));
+        prompt.AddChoices(subDirectories.Select(d => $"📁 {Path.GetFileName(d)}"));
+
+        var parentDirectory = Directory.GetParent(currentDir);
+        if (parentDirectory != null)
+            prompt.AddChoice("↩ Go up");
+
+        prompt.AddChoice("❌ Cancel");
+
+        var choice = AnsiConsole.Prompt(prompt);
+
+        if (choice.StartsWith("📄 ", StringComparison.Ordinal))
+        {
+            var fileName = choice[(choice.IndexOf(' ') + 1)..].Trim();
+            return Path.Combine(currentDir, fileName);
+        }
+
+        if (choice.StartsWith("📁 ", StringComparison.Ordinal))
+        {
+            var dirName = choice[(choice.IndexOf(' ') + 1)..].Trim();
+            currentDir = Path.Combine(currentDir, dirName);
+            continue;
+        }
+
+        if (choice == "↩ Go up")
+        {
+            if (parentDirectory != null)
+                currentDir = parentDirectory.FullName;
+            continue;
+        }
+
+        if (choice == "✍ Enter full path manually")
+        {
+            var input = AnsiConsole.Prompt(
+                new TextPrompt<string>("README path")
+                    .PromptStyle("green")
+                    .DefaultValue(Path.Combine(repoDir, "README.md"))
+                    .Validate(path =>
+                        File.Exists(path)
+                            ? ValidationResult.Success()
+                            : ValidationResult.Error("README file does not exist.")));
+
+            return Path.GetFullPath(input);
+        }
+
+        if (choice == "❌ Cancel")
+            throw new OperationCanceledException("README selection cancelled.");
+    }
+}
+
+static bool IsReadmeCandidate(string filePath)
+{
+    var fileName = Path.GetFileName(filePath);
+    return fileName.Equals("README.md", StringComparison.OrdinalIgnoreCase)
+        || fileName.Equals("README", StringComparison.OrdinalIgnoreCase)
+        || fileName.Equals("README.rst", StringComparison.OrdinalIgnoreCase)
+        || fileName.Equals("README.txt", StringComparison.OrdinalIgnoreCase)
+        || fileName.StartsWith("README.", StringComparison.OrdinalIgnoreCase);
+}
+
+static string GetFieldValue(ToolMetadata metadata, string field) => field switch
+{
+    "name" => metadata.Name,
+    "tagline" => metadata.Tagline,
+    "description" => metadata.Description,
+    "github_url" => metadata.GitHubUrl,
+    "website" => metadata.WebsiteUrl ?? string.Empty,
+    "author" => metadata.Author,
+    "author_github" => metadata.AuthorGitHub,
+    "tags" => metadata.Tags,
+    "language" => metadata.Language ?? string.Empty,
+    "license" => metadata.License ?? string.Empty,
+    _ => string.Empty
+};
+
+static void SetFieldValue(ToolMetadata metadata, string field, string value)
+{
+    switch (field)
+    {
+        case "name": metadata.Name = value; break;
+        case "tagline": metadata.Tagline = value; break;
+        case "description": metadata.Description = value; break;
+        case "github_url": metadata.GitHubUrl = value; break;
+        case "website": metadata.WebsiteUrl = value; break;
+        case "author": metadata.Author = value; break;
+        case "author_github": metadata.AuthorGitHub = value; break;
+        case "tags": metadata.Tags = value; break;
+        case "language": metadata.Language = value; break;
+        case "license": metadata.License = value; break;
     }
 }

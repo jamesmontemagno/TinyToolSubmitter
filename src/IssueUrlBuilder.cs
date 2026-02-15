@@ -5,7 +5,7 @@ namespace TinyToolSubmitter;
 /// </summary>
 public static class IssueUrlBuilder
 {
-    private const string BaseUrl = "https://github.com/jamesmontemagno/TinyToolTown/issues/new";
+    private const string BaseUrl = "https://github.com/shanselman/TinyToolTown/issues/new";
     private const string Template = "submit-tool.yml";
 
     /// <summary>

@@ -67,3 +67,7 @@ tiny-tool-submit [path-to-repo]
 	--headless          Skip interactive prompts, open URL directly
 	--model <name>      Copilot model to use (default: gpt-5-mini)
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
