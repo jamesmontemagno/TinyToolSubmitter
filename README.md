@@ -38,10 +38,14 @@ tiny-tool-submit [path-to-repo]
 ## Project Layout
 
 - `src/` — .NET tool source (`TinyToolSubmitter.csproj` and app code)
+- `nodejs/` — Node.js/TypeScript version of the tool
 - `.github/workflows/release-submitter.yml` — NuGet release workflow
+- `.github/workflows/publish-npm.yml` — npm release workflow
 - `LICENSE` — MIT license
 
 ## Local Development
+
+### .NET
 
 ```bash
 dotnet restore src/TinyToolSubmitter.csproj
@@ -54,15 +58,50 @@ Run locally:
 dotnet run --project src/TinyToolSubmitter.csproj -- [path-to-repo]
 ```
 
+### Node.js
+
+```bash
+cd nodejs
+npm install
+npm run build
+```
+
+Run locally:
+
+```bash
+node nodejs/dist/index.js [path-to-repo]
+```
+
+Or during development:
+
+```bash
+cd nodejs
+npm run dev -- [path-to-repo]
+```
+
+### npm install alternative
+
+```bash
+npm install -g tiny-tool-submitter
+tiny-tool-submit [path-to-repo]
+```
+
 ## Release Workflow
 
-This repo includes a tag-triggered workflow:
+This repo includes tag-triggered workflows for both NuGet and npm:
 
+### .NET / NuGet
 - Workflow: `.github/workflows/release-submitter.yml`
 - Trigger tag format: `submitter-v*` (example: `submitter-v1.0.0`)
 - Required secret: `NUGET_API_KEY`
 
-The workflow builds and packs `src/TinyToolSubmitter.csproj`, pushes to NuGet.org, and creates a GitHub release with the package artifact.
+### Node.js / npm
+- Workflow: `.github/workflows/publish-npm.yml`
+- Trigger tag format: `npm-v*` (example: `npm-v1.0.0`)
+- Also supports `workflow_dispatch` with a version input
+- Required secret: `NPM_TOKEN`
+
+Both workflows build, publish, and handle versioning automatically.
 
 ## Tool Usage
 
