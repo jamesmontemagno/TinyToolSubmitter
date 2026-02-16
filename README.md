@@ -113,6 +113,7 @@ tiny-tool-submit [path-to-repo]
 	--headless          Skip interactive prompts, open URL directly
 	--model <name>      Copilot model to use (default: gpt-4.1)
 	--cli-path <path>   Path to Copilot CLI executable (default: auto-detect on PATH, then copilot)
+	--theme <name>      Tiny Tool Town page theme (or 'none' for site default)
 	--verbose           Print Copilot CLI startup diagnostics
 ```
 

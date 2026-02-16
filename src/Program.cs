@@ -13,11 +13,13 @@ var verbose = flagArgs.Contains("--verbose");
 string? flagReadmePath = null;
 string? flagModelName = null;
 string? flagCliPath = null;
+string? flagThemeName = null;
 for (int i = 0; i < args.Length - 1; i++)
 {
     if (args[i] == "--readme") flagReadmePath = args[i + 1];
     if (args[i] == "--model") flagModelName = args[i + 1];
     if (args[i] == "--cli-path") flagCliPath = args[i + 1];
+    if (args[i] == "--theme") flagThemeName = args[i + 1];
 }
 
 Console.ForegroundColor = ConsoleColor.Cyan;
@@ -299,6 +301,21 @@ try
     metadata.License = license;
     metadata.Author = authorName ?? "";
     metadata.AuthorGitHub = authorGitHub ?? "";
+    metadata.Theme = NormalizeThemeSelection(metadata.Theme);
+
+    if (!string.IsNullOrWhiteSpace(flagThemeName))
+    {
+        if (!TryParseThemeFlagValue(flagThemeName, out var parsedTheme))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"❌ Invalid theme '{flagThemeName}'.");
+            Console.ResetColor();
+            Console.WriteLine($"   Valid values: {string.Join(", ", GetThemeFlagValues())}");
+            return 1;
+        }
+
+        metadata.Theme = parsedTheme;
+    }
 
     // --- Step 4: Review metadata ---
     AnsiConsole.Write(new Rule("[cyan]📋 Generated Submission Metadata[/]"));
@@ -676,6 +693,57 @@ static IReadOnlyList<string> GetThemeOptions()
         "newspaper",
         "retro"
     ];
+}
+
+static IReadOnlyList<string> GetThemeFlagValues()
+{
+    return
+    [
+        "none",
+        "terminal",
+        "neon",
+        "minimal",
+        "pastel",
+        "matrix",
+        "sunset",
+        "ocean",
+        "forest",
+        "candy",
+        "synthwave",
+        "newspaper",
+        "retro"
+    ];
+}
+
+static bool TryParseThemeFlagValue(string value, out string? theme)
+{
+    var trimmed = value.Trim();
+    if (string.IsNullOrWhiteSpace(trimmed))
+    {
+        theme = null;
+        return false;
+    }
+
+    if (trimmed.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("site-default", StringComparison.OrdinalIgnoreCase))
+    {
+        theme = null;
+        return true;
+    }
+
+    var allowed = GetThemeOptions()
+        .Where(option => !option.Equals("None (site default)", StringComparison.OrdinalIgnoreCase));
+
+    var match = allowed.FirstOrDefault(option => option.Equals(trimmed, StringComparison.OrdinalIgnoreCase));
+    if (match == null)
+    {
+        theme = null;
+        return false;
+    }
+
+    theme = match;
+    return true;
 }
 
 static IReadOnlyList<(string Theme, string[] Colors)> GetThemePalettes()

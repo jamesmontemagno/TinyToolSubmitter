@@ -64,6 +64,7 @@ function getFlagValue(flag: string): string | undefined {
 const flagReadmePath = getFlagValue("--readme");
 const flagModelName = getFlagValue("--model");
 const flagCliPath = getFlagValue("--cli-path");
+const flagThemeName = getFlagValue("--theme");
 
 console.log("\x1b[36m╔══════════════════════════════════════════════════════════════╗");
 console.log("║       Tiny Tool Town — Submission Helper 🏘️📋                 ║");
@@ -253,6 +254,17 @@ try {
     metadata.author = authorName ?? "";
     metadata.authorGitHub = authorGitHub ?? "";
     metadata.theme = normalizeThemeSelection(metadata.theme);
+
+    if (flagThemeName) {
+        const parsedTheme = parseThemeFlagValue(flagThemeName);
+        if (parsedTheme === undefined && !isNoThemeFlagValue(flagThemeName)) {
+            console.error(`\x1b[31m❌ Invalid theme '${flagThemeName}'.\x1b[0m`);
+            console.log(`   Valid values: ${getThemeFlagValues().join(", ")}`);
+            process.exit(1);
+        }
+
+        metadata.theme = parsedTheme;
+    }
 
     // --- Step 4: Review metadata ---
     console.log("\n\x1b[36m📋 Generated Submission Metadata\x1b[0m");
@@ -552,6 +564,38 @@ function normalizeThemeSelection(value?: string): string | undefined {
     if (!value) return undefined;
     if (value.toLowerCase() === "none (site default)") return undefined;
     return value;
+}
+
+function isNoThemeFlagValue(value: string): boolean {
+    const lower = value.trim().toLowerCase();
+    return lower === "none" || lower === "default" || lower === "site-default";
+}
+
+function parseThemeFlagValue(value: string): string | undefined {
+    if (isNoThemeFlagValue(value)) return undefined;
+
+    const trimmed = value.trim();
+    const options = THEME_OPTIONS.filter((option) => option !== "None (site default)");
+    const match = options.find((option) => option.toLowerCase() === trimmed.toLowerCase());
+    return match;
+}
+
+function getThemeFlagValues(): string[] {
+    return [
+        "none",
+        "terminal",
+        "neon",
+        "minimal",
+        "pastel",
+        "matrix",
+        "sunset",
+        "ocean",
+        "forest",
+        "candy",
+        "synthwave",
+        "newspaper",
+        "retro",
+    ];
 }
 
 function displayTheme(value?: string): string {

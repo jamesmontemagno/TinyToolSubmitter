@@ -20,6 +20,7 @@ Options:
 - `--headless` skip interactive prompts
 - `--model <name>` Copilot model to use (default: `gpt-4.1`)
 - `--cli-path <path>` path to Copilot CLI executable
+- `--theme <name>` Tiny Tool Town page theme (or `none` for site default)
 - `--verbose` print Copilot CLI startup diagnostics
 
 In interactive mode, the CLI includes Tiny Tool Town's optional page `theme`
