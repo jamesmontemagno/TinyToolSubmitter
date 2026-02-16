@@ -22,6 +22,9 @@ Options:
 - `--cli-path <path>` path to Copilot CLI executable
 - `--verbose` print Copilot CLI startup diagnostics
 
+In interactive mode, the CLI includes Tiny Tool Town's optional page `theme`
+picker and prints a color swatch preview for each available theme.
+
 ## Requirements
 
 - Node.js 18+

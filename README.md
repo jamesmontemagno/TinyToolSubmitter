@@ -116,6 +116,10 @@ tiny-tool-submit [path-to-repo]
 	--verbose           Print Copilot CLI startup diagnostics
 ```
 
+Both the .NET and Node CLIs now support Tiny Tool Town's optional `theme` field.
+In interactive mode, they show a theme picker and a terminal color swatch preview
+for each available page theme before submission.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

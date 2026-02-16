@@ -306,6 +306,15 @@ try
 
     if (!headless)
     {
+        RenderThemePaletteTable();
+
+        if (AnsiConsole.Confirm("Select a page theme now?", false))
+        {
+            metadata.Theme = PromptForTheme(metadata.Theme);
+            AnsiConsole.MarkupLine($"[green]✅ Updated theme to {DisplayTheme(metadata.Theme)}[/]");
+            RenderMetadataTable(metadata);
+        }
+
         while (true)
         {
             var fieldChoice = AnsiConsole.Prompt(
@@ -323,11 +332,21 @@ try
                         "author_github",
                         "tags",
                         "language",
-                        "license"
+                        "license",
+                        "theme"
                     ]));
 
             if (fieldChoice == "Done")
                 break;
+
+            if (fieldChoice == "theme")
+            {
+                RenderThemePaletteTable();
+                metadata.Theme = PromptForTheme(metadata.Theme);
+                AnsiConsole.MarkupLine($"[green]✅ Updated theme to {DisplayTheme(metadata.Theme)}[/]");
+                RenderMetadataTable(metadata);
+                continue;
+            }
 
             var currentValue = GetFieldValue(metadata, fieldChoice);
             var newValue = AnsiConsole.Prompt(
@@ -436,6 +455,7 @@ static void RenderMetadataTable(ToolMetadata metadata)
     table.AddRow("Tags", metadata.Tags);
     table.AddRow("Language", metadata.Language ?? "(not detected)");
     table.AddRow("License", metadata.License ?? "(not detected)");
+    table.AddRow("Theme", DisplayTheme(metadata.Theme));
 
     AnsiConsole.Write(table);
 }
@@ -554,6 +574,7 @@ static string GetFieldValue(ToolMetadata metadata, string field) => field switch
     "tags" => metadata.Tags,
     "language" => metadata.Language ?? string.Empty,
     "license" => metadata.License ?? string.Empty,
+    "theme" => DisplayTheme(metadata.Theme),
     _ => string.Empty
 };
 
@@ -571,7 +592,109 @@ static void SetFieldValue(ToolMetadata metadata, string field, string value)
         case "tags": metadata.Tags = value; break;
         case "language": metadata.Language = value; break;
         case "license": metadata.License = value; break;
+        case "theme": metadata.Theme = NormalizeThemeSelection(value); break;
     }
+}
+
+static void RenderThemePaletteTable()
+{
+    var palettes = GetThemePalettes();
+
+    var table = new Table()
+        .RoundedBorder()
+        .AddColumn("[yellow]Theme[/]")
+        .AddColumn("[yellow]Preview[/]")
+        .AddColumn("[yellow]Palette[/]");
+
+    table.AddRow("None (site default)", "(uses Tiny Tool Town default)", "");
+
+    foreach (var (theme, colors) in palettes)
+    {
+        var swatches = string.Join(" ", colors.Select(color => $"[{color}]■[/]"));
+        table.AddRow(theme, swatches, string.Join(", ", colors));
+    }
+
+    AnsiConsole.Write(new Rule("[cyan]🎨 Theme Preview[/]"));
+    AnsiConsole.Write(table);
+}
+
+static string? PromptForTheme(string? currentTheme)
+{
+    var options = GetThemeOptions();
+    var defaultChoice = string.IsNullOrWhiteSpace(currentTheme)
+        ? "None (site default)"
+        : currentTheme;
+
+    if (!options.Contains(defaultChoice, StringComparer.OrdinalIgnoreCase))
+        defaultChoice = "None (site default)";
+
+    var orderedOptions = options
+        .OrderByDescending(option => option.Equals(defaultChoice, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    var selected = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+            .Title("[yellow]🎨 Select page theme[/]")
+            .PageSize(15)
+            .AddChoices(orderedOptions));
+
+    return NormalizeThemeSelection(selected);
+}
+
+static string DisplayTheme(string? theme)
+{
+    return string.IsNullOrWhiteSpace(theme)
+        ? "None (site default)"
+        : theme;
+}
+
+static string? NormalizeThemeSelection(string? selection)
+{
+    if (string.IsNullOrWhiteSpace(selection))
+        return null;
+
+    return selection.Equals("None (site default)", StringComparison.OrdinalIgnoreCase)
+        ? null
+        : selection.Trim();
+}
+
+static IReadOnlyList<string> GetThemeOptions()
+{
+    return
+    [
+        "None (site default)",
+        "terminal",
+        "neon",
+        "minimal",
+        "pastel",
+        "matrix",
+        "sunset",
+        "ocean",
+        "forest",
+        "candy",
+        "synthwave",
+        "newspaper",
+        "retro"
+    ];
+}
+
+static IReadOnlyList<(string Theme, string[] Colors)> GetThemePalettes()
+{
+    return
+    [
+        ("terminal", ["#0A0A0A", "#111111", "#00FF41", "#39FF14"]),
+        ("neon", ["#0D0221", "#150535", "#FF2A6D", "#05D9E8"]),
+        ("minimal", ["#FAFAFA", "#FFFFFF", "#333333", "#555555"]),
+        ("pastel", ["#FEF6F9", "#FFFFFF", "#E8829A", "#82B4E8"]),
+        ("matrix", ["#000800", "#001200", "#00FF00", "#00CC00"]),
+        ("sunset", ["#1A0A2E", "#251244", "#FF6B35", "#FF9F1C"]),
+        ("ocean", ["#0A1628", "#0F2035", "#00B4D8", "#0096C7"]),
+        ("forest", ["#1A2416", "#243020", "#82B74B", "#C4A35A"]),
+        ("candy", ["#FF69B4", "#FF91CB", "#FFFF00", "#00FFCC"]),
+        ("synthwave", ["#1A1033", "#241546", "#FF71CE", "#01CDFE"]),
+        ("newspaper", ["#F2EFE6", "#FFFDF7", "#B91C1C", "#1A1A1A"]),
+        ("retro", ["#1A1200", "#2A1F00", "#FFB000", "#FF8C00"])
+    ];
 }
 
 static bool IsCopilotCliMissingError(Exception ex)

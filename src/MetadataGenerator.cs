@@ -19,6 +19,7 @@ public record ToolMetadata
     public string Tags { get; set; } = "";
     public string? Language { get; set; }
     public string? License { get; set; }
+    public string? Theme { get; set; }
 }
 
 /// <summary>

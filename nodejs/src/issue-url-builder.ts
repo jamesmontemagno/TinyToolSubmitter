@@ -9,6 +9,7 @@ export interface ToolMetadata {
     tags: string;
     language?: string;
     license?: string;
+    theme?: string;
 }
 
 const BASE_URL = "https://github.com/shanselman/TinyToolTown/issues/new";
@@ -39,6 +40,9 @@ export function buildIssueUrl(metadata: ToolMetadata): string {
     }
     if (metadata.license) {
         params.push(`license=${encodeURIComponent(metadata.license)}`);
+    }
+    if (metadata.theme) {
+        params.push(`theme=${encodeURIComponent(metadata.theme)}`);
     }
 
     return `${BASE_URL}?${params.join("&")}`;

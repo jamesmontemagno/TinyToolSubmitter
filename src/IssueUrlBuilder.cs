@@ -37,6 +37,9 @@ public static class IssueUrlBuilder
         if (!string.IsNullOrWhiteSpace(metadata.License))
             parameters.Add($"license={Uri.EscapeDataString(metadata.License)}");
 
+        if (!string.IsNullOrWhiteSpace(metadata.Theme))
+            parameters.Add($"theme={Uri.EscapeDataString(metadata.Theme)}");
+
         return $"{BaseUrl}?{string.Join("&", parameters)}";
     }
 }

@@ -17,6 +17,37 @@ import { generateMetadata } from "./metadata-generator.js";
 import { buildIssueUrl } from "./issue-url-builder.js";
 import type { ToolMetadata } from "./issue-url-builder.js";
 
+const THEME_OPTIONS = [
+    "None (site default)",
+    "terminal",
+    "neon",
+    "minimal",
+    "pastel",
+    "matrix",
+    "sunset",
+    "ocean",
+    "forest",
+    "candy",
+    "synthwave",
+    "newspaper",
+    "retro",
+] as const;
+
+const THEME_PALETTES: Array<{ name: string; colors: [string, string, string, string] }> = [
+    { name: "terminal", colors: ["#0A0A0A", "#111111", "#00FF41", "#39FF14"] },
+    { name: "neon", colors: ["#0D0221", "#150535", "#FF2A6D", "#05D9E8"] },
+    { name: "minimal", colors: ["#FAFAFA", "#FFFFFF", "#333333", "#555555"] },
+    { name: "pastel", colors: ["#FEF6F9", "#FFFFFF", "#E8829A", "#82B4E8"] },
+    { name: "matrix", colors: ["#000800", "#001200", "#00FF00", "#00CC00"] },
+    { name: "sunset", colors: ["#1A0A2E", "#251244", "#FF6B35", "#FF9F1C"] },
+    { name: "ocean", colors: ["#0A1628", "#0F2035", "#00B4D8", "#0096C7"] },
+    { name: "forest", colors: ["#1A2416", "#243020", "#82B74B", "#C4A35A"] },
+    { name: "candy", colors: ["#FF69B4", "#FF91CB", "#FFFF00", "#00FFCC"] },
+    { name: "synthwave", colors: ["#1A1033", "#241546", "#FF71CE", "#01CDFE"] },
+    { name: "newspaper", colors: ["#F2EFE6", "#FFFDF7", "#B91C1C", "#1A1A1A"] },
+    { name: "retro", colors: ["#1A1200", "#2A1F00", "#FFB000", "#FF8C00"] },
+];
+
 // --- Parse CLI flags ---
 const args = process.argv.slice(2);
 const flagArgs = args.filter((a) => a.startsWith("-"));
@@ -221,12 +252,22 @@ try {
     metadata.license = license ?? undefined;
     metadata.author = authorName ?? "";
     metadata.authorGitHub = authorGitHub ?? "";
+    metadata.theme = normalizeThemeSelection(metadata.theme);
 
     // --- Step 4: Review metadata ---
     console.log("\n\x1b[36m📋 Generated Submission Metadata\x1b[0m");
     printMetadataTable(metadata);
 
     if (!headless) {
+        displayThemePaletteTable();
+
+        const selectThemeNow = await confirm({ message: "Select a page theme now?", default: false });
+        if (selectThemeNow) {
+            metadata.theme = await promptForTheme(metadata.theme);
+            console.log(`\x1b[32m✅ Updated theme to ${displayTheme(metadata.theme)}\x1b[0m`);
+            printMetadataTable(metadata);
+        }
+
         let editing = true;
         while (editing) {
             const fieldChoice = await select({
@@ -243,12 +284,21 @@ try {
                     { name: "tags", value: "tags" },
                     { name: "language", value: "language" },
                     { name: "license", value: "license" },
+                    { name: "theme", value: "theme" },
                 ],
             });
 
             if (fieldChoice === "done") {
                 editing = false;
                 break;
+            }
+
+            if (fieldChoice === "theme") {
+                displayThemePaletteTable();
+                metadata.theme = await promptForTheme(metadata.theme);
+                console.log(`\x1b[32m✅ Updated theme to ${displayTheme(metadata.theme)}\x1b[0m`);
+                printMetadataTable(metadata);
+                continue;
             }
 
             const currentValue = getFieldValue(metadata, fieldChoice);
@@ -323,6 +373,7 @@ function printMetadataTable(metadata: ToolMetadata): void {
         ["Tags", metadata.tags],
         ["Language", metadata.language ?? "(not detected)"],
         ["License", metadata.license ?? "(not detected)"],
+        ["Theme", displayTheme(metadata.theme)],
     ];
 
     console.log("┌──────────────┬──────────────────────────────────────────────────┐");
@@ -465,6 +516,7 @@ function getFieldValue(metadata: ToolMetadata, field: string): string {
         case "tags": return metadata.tags;
         case "language": return metadata.language ?? "";
         case "license": return metadata.license ?? "";
+        case "theme": return displayTheme(metadata.theme);
         default: return "";
     }
 }
@@ -481,5 +533,53 @@ function setFieldValue(metadata: ToolMetadata, field: string, value: string): vo
         case "tags": metadata.tags = value; break;
         case "language": metadata.language = value; break;
         case "license": metadata.license = value; break;
+        case "theme": metadata.theme = normalizeThemeSelection(value); break;
     }
+}
+
+async function promptForTheme(currentTheme?: string): Promise<string | undefined> {
+    const defaultTheme = displayTheme(currentTheme);
+    const theme = await select({
+        message: "🎨 Select page theme",
+        default: defaultTheme,
+        choices: THEME_OPTIONS.map((option) => ({ name: option, value: option })),
+    });
+
+    return normalizeThemeSelection(theme);
+}
+
+function normalizeThemeSelection(value?: string): string | undefined {
+    if (!value) return undefined;
+    if (value.toLowerCase() === "none (site default)") return undefined;
+    return value;
+}
+
+function displayTheme(value?: string): string {
+    return value ?? "None (site default)";
+}
+
+function displayThemePaletteTable(): void {
+    console.log("\n\x1b[36m🎨 Theme Preview\x1b[0m");
+    console.log("   None (site default)  uses Tiny Tool Town default");
+
+    for (const palette of THEME_PALETTES) {
+        const swatches = palette.colors.map((hex) => colorizeSwatch(hex)).join(" ");
+        console.log(`   ${palette.name.padEnd(12)} ${swatches}  ${palette.colors.join(", ")}`);
+    }
+}
+
+function colorizeSwatch(hex: string): string {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return "■";
+    return `\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m■\x1b[0m`;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+    const normalized = hex.replace("#", "");
+    if (!/^[0-9A-Fa-f]{6}$/.test(normalized)) return null;
+    return {
+        r: Number.parseInt(normalized.slice(0, 2), 16),
+        g: Number.parseInt(normalized.slice(2, 4), 16),
+        b: Number.parseInt(normalized.slice(4, 6), 16),
+    };
 }
