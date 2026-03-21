@@ -266,7 +266,8 @@ try
     session = await client.CreateSessionAsync(new SessionConfig
     {
         Model = selectedModel,
-        Streaming = true
+        Streaming = true,
+        OnPermissionRequest = PermissionHandler.ApproveAll
     });
 
     ToolMetadata? metadata;

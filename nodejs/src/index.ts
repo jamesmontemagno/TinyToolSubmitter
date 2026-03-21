@@ -3,7 +3,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import { select, confirm, input } from "@inquirer/prompts";
 import {
     findReadme,
@@ -237,6 +237,7 @@ try {
         model: selectedModel,
         streaming: true,
         infiniteSessions: { enabled: false },
+        onPermissionRequest: approveAll,
     });
 
     console.log("\x1b[90m   Analyzing README with AI...\x1b[0m");

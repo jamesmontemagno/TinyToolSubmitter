@@ -33,7 +33,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@github/copilot-sdk": "^0.1.22",
+    "@github/copilot-sdk": "^0.2.0",
     "@inquirer/prompts": "^7.0.0"
   },
   "devDependencies": {
