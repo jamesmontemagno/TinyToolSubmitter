@@ -96,7 +96,8 @@ if (!File.Exists(readmePath))
     return 1;
 }
 
-var readmeContent = await File.ReadAllTextAsync(readmePath);
+var fullReadmeContent = await File.ReadAllTextAsync(readmePath);
+var readmeContent = fullReadmeContent;
 if (readmeContent.Length > 4000)
     readmeContent = readmeContent[..4000] + "\n\n[truncated]";
 
@@ -110,6 +111,7 @@ var license = RepoDetector.DetectLicense(repoDir);
 var language = RepoDetector.DetectLanguage(repoDir);
 var authorName = RepoDetector.DetectGitUserName(repoDir);
 var authorGitHub = RepoDetector.DetectGitHubUsername(githubUrl);
+var websiteUrl = RepoDetector.DetectWebsiteOrDemoUrl(fullReadmeContent, githubUrl);
 var repoName = githubUrl != null
     ? new Uri(githubUrl).AbsolutePath.Trim('/').Split('/').LastOrDefault() ?? Path.GetFileName(repoDir)
     : Path.GetFileName(repoDir);
@@ -120,6 +122,7 @@ if (license != null) Console.WriteLine($"   License:    {license}");
 if (language != null) Console.WriteLine($"   Language:   {language}");
 if (authorName != null) Console.WriteLine($"   Author:     {authorName}");
 if (authorGitHub != null) Console.WriteLine($"   Username:   {authorGitHub}");
+if (websiteUrl != null) Console.WriteLine($"   Website:    {websiteUrl}");
 Console.ResetColor();
 
 // --- Step 3: Use Copilot to generate metadata ---
@@ -302,6 +305,7 @@ try
     metadata.License = license;
     metadata.Author = authorName ?? "";
     metadata.AuthorGitHub = authorGitHub ?? "";
+    metadata.WebsiteUrl ??= websiteUrl;
     metadata.Theme = NormalizeThemeSelection(metadata.Theme);
 
     if (!string.IsNullOrWhiteSpace(flagThemeName))
@@ -671,9 +675,14 @@ static string? NormalizeThemeSelection(string? selection)
     if (string.IsNullOrWhiteSpace(selection))
         return null;
 
-    return selection.Equals("None (site default)", StringComparison.OrdinalIgnoreCase)
-        ? null
-        : selection.Trim();
+    var trimmed = selection.Trim();
+    if (trimmed.Equals("None (site default)", StringComparison.OrdinalIgnoreCase))
+        return null;
+
+    var allowed = GetThemeOptions()
+        .Where(option => !option.Equals("None (site default)", StringComparison.OrdinalIgnoreCase));
+
+    return allowed.FirstOrDefault(option => option.Equals(trimmed, StringComparison.OrdinalIgnoreCase));
 }
 
 static IReadOnlyList<string> GetThemeOptions()

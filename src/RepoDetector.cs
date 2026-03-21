@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace TinyToolSubmitter;
 
@@ -7,6 +8,11 @@ namespace TinyToolSubmitter;
 /// </summary>
 public static class RepoDetector
 {
+    private static readonly string[] WebsiteHintKeywords =
+    [
+        "demo", "try", "website", "live", "app", "preview", "play"
+    ];
+
     private static readonly string[] ReadmeNames =
     [
         "README.md", "readme.md", "Readme.md",
@@ -97,6 +103,41 @@ public static class RepoDetector
         return null;
     }
 
+    /// <summary>
+    /// Detects a likely public website/demo URL from README markdown.
+    /// </summary>
+    public static string? DetectWebsiteOrDemoUrl(string readmeContent, string? githubUrl)
+    {
+        if (string.IsNullOrWhiteSpace(readmeContent))
+            return null;
+
+        var githubRepoUri = TryCreateUri(githubUrl);
+        var candidates = new List<(string Url, int Score, int Order)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var order = 0;
+
+        foreach (Match match in Regex.Matches(readmeContent, @"\[(?<label>[^\]]+)\]\((?<url>https?://[^\s)]+)\)", RegexOptions.IgnoreCase))
+        {
+            var label = match.Groups["label"].Value;
+            var rawUrl = match.Groups["url"].Value;
+            if (TryBuildWebsiteCandidate(rawUrl, label, githubRepoUri, out var normalized, out var score) && seen.Add(normalized))
+                candidates.Add((normalized, score + 2, order++));
+        }
+
+        foreach (Match match in Regex.Matches(readmeContent, @"https?://[^\s<>()]+", RegexOptions.IgnoreCase))
+        {
+            var rawUrl = match.Value;
+            if (TryBuildWebsiteCandidate(rawUrl, null, githubRepoUri, out var normalized, out var score) && seen.Add(normalized))
+                candidates.Add((normalized, score, order++));
+        }
+
+        return candidates
+            .OrderByDescending(c => c.Score)
+            .ThenBy(c => c.Order)
+            .Select(c => c.Url)
+            .FirstOrDefault();
+    }
+
     private static string? DetectLicenseFromText(string content)
     {
         if (content.Contains("MIT License", StringComparison.OrdinalIgnoreCase) ||
@@ -137,6 +178,58 @@ public static class RepoDetector
             return "Unlicense";
 
         return null;
+    }
+
+    private static bool TryBuildWebsiteCandidate(
+        string rawUrl,
+        string? label,
+        Uri? githubRepoUri,
+        out string normalizedUrl,
+        out int score)
+    {
+        normalizedUrl = "";
+        score = 0;
+
+        var cleaned = rawUrl.Trim().TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '"', '\'');
+        if (!Uri.TryCreate(cleaned, UriKind.Absolute, out var uri))
+            return false;
+
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            !uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var host = uri.Host.ToLowerInvariant();
+        if (host is "github.com" or "raw.githubusercontent.com" or "img.shields.io")
+            return false;
+
+        var lowerPath = uri.AbsolutePath.ToLowerInvariant();
+        if (lowerPath.EndsWith(".png") || lowerPath.EndsWith(".jpg") || lowerPath.EndsWith(".jpeg") ||
+            lowerPath.EndsWith(".gif") || lowerPath.EndsWith(".svg") || lowerPath.EndsWith(".webp"))
+            return false;
+
+        if (githubRepoUri != null &&
+            uri.Host.Equals(githubRepoUri.Host, StringComparison.OrdinalIgnoreCase) &&
+            uri.AbsolutePath.StartsWith(githubRepoUri.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var hintText = $"{label} {uri.Host} {uri.AbsolutePath}";
+        score += WebsiteHintKeywords.Count(keyword => hintText.Contains(keyword, StringComparison.OrdinalIgnoreCase)) * 3;
+
+        if (host.Contains("vercel.app") || host.Contains("netlify.app") || host.Contains("pages.dev") || host.Contains("github.io"))
+            score += 2;
+
+        normalizedUrl = uri.AbsoluteUri.TrimEnd('/');
+        return true;
+    }
+
+    private static Uri? TryCreateUri(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            ? uri
+            : null;
     }
 
     /// <summary>

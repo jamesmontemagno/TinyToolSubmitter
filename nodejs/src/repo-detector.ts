@@ -9,6 +9,8 @@ const README_NAMES = [
     "README.txt", "readme.txt",
 ];
 
+const WEBSITE_HINT_KEYWORDS = ["demo", "try", "website", "live", "app", "preview", "play"];
+
 /**
  * Finds a README file in the given directory.
  */
@@ -67,6 +69,44 @@ export function detectLicense(directory: string): string | null {
     return null;
 }
 
+/**
+ * Detects a likely public website/demo URL from README markdown.
+ */
+export function detectWebsiteOrDemoUrl(readmeContent: string, githubUrl?: string | null): string | null {
+    if (!readmeContent?.trim()) return null;
+
+    const githubRepo = tryParseUrl(githubUrl ?? undefined);
+    const candidates: Array<{ url: string; score: number; order: number }> = [];
+    const seen = new Set<string>();
+    let order = 0;
+
+    const markdownLinkRegex = /\[(?<label>[^\]]+)\]\((?<url>https?:\/\/[^\s)]+)\)/gi;
+    for (const match of readmeContent.matchAll(markdownLinkRegex)) {
+        const label = match.groups?.label;
+        const rawUrl = match.groups?.url;
+        if (!rawUrl) continue;
+
+        const candidate = buildWebsiteCandidate(rawUrl, label, githubRepo);
+        if (candidate && !seen.has(candidate.url)) {
+            seen.add(candidate.url);
+            candidates.push({ url: candidate.url, score: candidate.score + 2, order: order++ });
+        }
+    }
+
+    const bareUrlRegex = /https?:\/\/[^\s<>()]+/gi;
+    for (const match of readmeContent.matchAll(bareUrlRegex)) {
+        const rawUrl = match[0];
+        const candidate = buildWebsiteCandidate(rawUrl, undefined, githubRepo);
+        if (candidate && !seen.has(candidate.url)) {
+            seen.add(candidate.url);
+            candidates.push({ url: candidate.url, score: candidate.score, order: order++ });
+        }
+    }
+
+    candidates.sort((a, b) => b.score - a.score || a.order - b.order);
+    return candidates[0]?.url ?? null;
+}
+
 function detectLicenseFromText(content: string): string | null {
     const lower = content.toLowerCase();
 
@@ -90,6 +130,58 @@ function detectLicenseFromText(content: string): string | null {
         return "Unlicense";
 
     return null;
+}
+
+function buildWebsiteCandidate(
+    rawUrl: string,
+    label: string | undefined,
+    githubRepo: URL | null,
+): { url: string; score: number } | null {
+    const cleaned = rawUrl.trim().replace(/[.,;:!?\)\]"']+$/g, "");
+    const parsed = tryParseUrl(cleaned);
+    if (!parsed) return null;
+
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== "https:" && protocol !== "http:") return null;
+
+    const host = parsed.hostname.toLowerCase();
+    if (host === "github.com" || host === "raw.githubusercontent.com" || host === "img.shields.io") {
+        return null;
+    }
+
+    const lowerPath = parsed.pathname.toLowerCase();
+    if (/(\.png|\.jpe?g|\.gif|\.svg|\.webp)$/.test(lowerPath)) {
+        return null;
+    }
+
+    if (
+        githubRepo &&
+        parsed.hostname.toLowerCase() === githubRepo.hostname.toLowerCase() &&
+        parsed.pathname.toLowerCase().startsWith(githubRepo.pathname.toLowerCase())
+    ) {
+        return null;
+    }
+
+    let score = 0;
+    const hintText = `${label ?? ""} ${parsed.hostname} ${parsed.pathname}`.toLowerCase();
+    for (const keyword of WEBSITE_HINT_KEYWORDS) {
+        if (hintText.includes(keyword)) score += 3;
+    }
+
+    if (/(vercel\.app|netlify\.app|pages\.dev|github\.io)$/.test(host)) {
+        score += 2;
+    }
+
+    return { url: parsed.href.replace(/\/$/, ""), score };
+}
+
+function tryParseUrl(value?: string): URL | null {
+    if (!value?.trim()) return null;
+    try {
+        return new URL(value);
+    } catch {
+        return null;
+    }
 }
 
 /**

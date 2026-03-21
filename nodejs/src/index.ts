@@ -12,6 +12,7 @@ import {
     detectLanguage,
     detectGitUserName,
     detectGitHubUsername,
+    detectWebsiteOrDemoUrl,
 } from "./repo-detector.js";
 import { generateMetadata } from "./metadata-generator.js";
 import { buildIssueUrl } from "./issue-url-builder.js";
@@ -114,7 +115,8 @@ if (!fs.existsSync(readmePath)) {
     process.exit(1);
 }
 
-let readmeContent = fs.readFileSync(readmePath, "utf-8");
+const fullReadmeContent = fs.readFileSync(readmePath, "utf-8");
+let readmeContent = fullReadmeContent;
 if (readmeContent.length > 4000) {
     readmeContent = readmeContent.slice(0, 4000) + "\n\n[truncated]";
 }
@@ -129,6 +131,7 @@ const license = detectLicense(repoDir);
 const language = detectLanguage(repoDir);
 const authorName = detectGitUserName(repoDir);
 const authorGitHub = detectGitHubUsername(githubUrl);
+const websiteUrl = detectWebsiteOrDemoUrl(fullReadmeContent, githubUrl);
 
 let repoName: string;
 if (githubUrl) {
@@ -149,6 +152,7 @@ if (license) console.log(`   License:    ${license}`);
 if (language) console.log(`   Language:   ${language}`);
 if (authorName) console.log(`   Author:     ${authorName}`);
 if (authorGitHub) console.log(`   Username:   ${authorGitHub}`);
+if (websiteUrl) console.log(`   Website:    ${websiteUrl}`);
 console.log("\x1b[0m");
 
 // --- Step 3: Use Copilot to generate metadata ---
@@ -254,6 +258,7 @@ try {
     metadata.license = license ?? undefined;
     metadata.author = authorName ?? "";
     metadata.authorGitHub = authorGitHub ?? "";
+    metadata.websiteUrl ??= websiteUrl ?? undefined;
     metadata.theme = normalizeThemeSelection(metadata.theme);
 
     if (flagThemeName) {
@@ -563,8 +568,15 @@ async function promptForTheme(currentTheme?: string): Promise<string | undefined
 
 function normalizeThemeSelection(value?: string): string | undefined {
     if (!value) return undefined;
-    if (value.toLowerCase() === "none (site default)") return undefined;
-    return value;
+
+    const trimmed = value.trim();
+    if (trimmed.toLowerCase() === "none (site default)") return undefined;
+
+    const match = THEME_OPTIONS
+        .filter((option) => option !== "None (site default)")
+        .find((option) => option.toLowerCase() === trimmed.toLowerCase());
+
+    return match;
 }
 
 function isNoThemeFlagValue(value: string): boolean {
