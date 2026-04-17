@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using GitHub.Copilot.SDK;
 using Spectre.Console;
 using TinyToolSubmitter;
@@ -133,24 +134,21 @@ CopilotSession? session = null;
 
 try
 {
-    var (cliPath, cliPathSource) = ResolveCliPath(flagCliPath);
+    var cliLaunch = ResolveCliLaunch(flagCliPath);
 
     if (verbose)
     {
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"   Copilot CLI path: {cliPath} ({cliPathSource})");
+        Console.WriteLine($"   Copilot CLI path: {cliLaunch.DisplayPath} ({cliLaunch.Source})");
         Console.ResetColor();
     }
 
-    if (!TryRunProcess(cliPath, "--version", out var versionStdOut, out var versionStdErr, out var versionExitCode))
+    if (!TryRunCopilotProcess(cliLaunch, out var versionStdOut, out var versionStdErr, out var versionExitCode, "--version"))
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"❌ Failed to execute GitHub Copilot CLI at '{cliPath}'.");
+        Console.WriteLine($"❌ Failed to execute GitHub Copilot CLI at '{cliLaunch.DisplayPath}'.");
         Console.ResetColor();
-        if (cliPathSource is "detected" or "path")
-            Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
-        else
-            Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
+        WriteCliResolutionGuidance(cliLaunch.Source);
         return 1;
     }
 
@@ -170,7 +168,7 @@ try
         Console.WriteLine($"   copilot --version: {versionStdOut}");
         Console.ResetColor();
 
-        if (TryRunProcess(cliPath, "auth status", out var authStdOut, out var authStdErr, out var authExitCode))
+        if (TryRunCopilotProcess(cliLaunch, out var authStdOut, out var authStdErr, out var authExitCode, "auth", "status"))
         {
             var authText = !string.IsNullOrWhiteSpace(authStdOut) ? authStdOut : authStdErr;
             Console.ForegroundColor = authExitCode == 0 ? ConsoleColor.DarkGray : ConsoleColor.Yellow;
@@ -181,7 +179,8 @@ try
 
     client = new CopilotClient(new CopilotClientOptions
     {
-        CliPath = cliPath
+        CliPath = cliLaunch.CliPath,
+        CliArgs = cliLaunch.CliArgs
     });
 
     try
@@ -191,12 +190,9 @@ try
     catch (Exception ex) when (IsCopilotCliMissingError(ex))
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"❌ GitHub Copilot CLI was not found at '{cliPath}'.");
+        Console.WriteLine($"❌ GitHub Copilot CLI was not found at '{cliLaunch.DisplayPath}'.");
         Console.ResetColor();
-        if (cliPathSource is "detected" or "path")
-            Console.WriteLine("   Install Copilot CLI and ensure `copilot` is available on your PATH.");
-        else
-            Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
+        WriteCliResolutionGuidance(cliLaunch.Source);
         Console.WriteLine("   Then run this tool again.");
         return 1;
     }
@@ -208,8 +204,8 @@ try
         Console.WriteLine("   The Copilot CLI process started but disconnected before initialization completed.");
         Console.WriteLine("   Try: `copilot --version` and `copilot auth status` (or `copilot auth login` if needed). ");
         Console.WriteLine("   Run with `--verbose` for startup diagnostics.");
-        if (cliPathSource == "argument")
-            Console.WriteLine("   Also verify your --cli-path executable is the official Copilot CLI binary.");
+        if (cliLaunch.Source is "argument" or "environment")
+            Console.WriteLine("   Also verify the configured Copilot CLI path points to the official Copilot CLI binary.");
         return 1;
     }
 
@@ -844,16 +840,113 @@ static bool TryRunProcess(string fileName, string arguments, out string standard
     }
 }
 
-static (string Path, string Source) ResolveCliPath(string? explicitCliPath)
+static bool TryRunCopilotProcess(CliLaunchConfig cliLaunch, out string standardOutput, out string standardError, out int exitCode, params string[] arguments)
+{
+    try
+    {
+        var processStartInfo = new ProcessStartInfo
+        {
+            FileName = cliLaunch.CliPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        if (cliLaunch.CliArgs != null)
+        {
+            foreach (var cliArg in cliLaunch.CliArgs)
+                processStartInfo.ArgumentList.Add(cliArg);
+        }
+
+        foreach (var argument in arguments)
+            processStartInfo.ArgumentList.Add(argument);
+
+        using var process = Process.Start(processStartInfo);
+        if (process == null)
+        {
+            standardOutput = "";
+            standardError = "";
+            exitCode = -1;
+            return false;
+        }
+
+        standardOutput = process.StandardOutput.ReadToEnd().Trim();
+        standardError = process.StandardError.ReadToEnd().Trim();
+        process.WaitForExit();
+        exitCode = process.ExitCode;
+        return true;
+    }
+    catch
+    {
+        standardOutput = "";
+        standardError = "";
+        exitCode = -1;
+        return false;
+    }
+}
+
+static CliLaunchConfig ResolveCliLaunch(string? explicitCliPath)
 {
     if (!string.IsNullOrWhiteSpace(explicitCliPath))
-        return (explicitCliPath.Trim(), "argument");
+        return CreateCliLaunchConfig(explicitCliPath.Trim(), "argument");
 
+    var environmentCliPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH");
+    if (!string.IsNullOrWhiteSpace(environmentCliPath))
+        return CreateCliLaunchConfig(environmentCliPath.Trim(), "environment");
+
+    if (TryFindUserInstalledCopilotCli() is { } userInstalledCli)
+        return CreateCliLaunchConfig(userInstalledCli.Path, userInstalledCli.Source);
+
+    var bundledCli = TryFindBundledCopilotCli();
+    if (!string.IsNullOrWhiteSpace(bundledCli))
+        return CreateCliLaunchConfig(bundledCli, "bundled");
+
+    return CreateCliLaunchConfig("copilot", "default");
+}
+
+static CliLaunchConfig CreateCliLaunchConfig(string discoveredPath, string source)
+{
+    if (OperatingSystem.IsWindows())
+    {
+        var extension = Path.GetExtension(discoveredPath);
+        if (extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".bat", StringComparison.OrdinalIgnoreCase))
+        {
+            var commandShell = Environment.GetEnvironmentVariable("ComSpec");
+            return new CliLaunchConfig(
+                string.IsNullOrWhiteSpace(commandShell) ? "cmd.exe" : commandShell,
+                ["/d", "/s", "/c", $"\"{discoveredPath}\""],
+                discoveredPath,
+                source);
+        }
+
+        if (extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            return new CliLaunchConfig(
+                "powershell.exe",
+                ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", discoveredPath],
+                discoveredPath,
+                source);
+        }
+    }
+
+    return new CliLaunchConfig(discoveredPath, null, discoveredPath, source);
+}
+
+static CliCandidate? TryFindUserInstalledCopilotCli()
+{
     var detectedCli = TryFindCopilotCliOnPath();
     if (!string.IsNullOrWhiteSpace(detectedCli))
-        return (detectedCli, "detected");
+        return new CliCandidate(detectedCli, "PATH");
 
-    return ("copilot", "path");
+    foreach (var candidate in GetCopilotCliInstallCandidates())
+    {
+        if (File.Exists(candidate.Path))
+            return candidate;
+    }
+
+    return null;
 }
 
 static string? TryFindCopilotCliOnPath()
@@ -862,24 +955,196 @@ static string? TryFindCopilotCliOnPath()
     {
         if (TryRunProcess("where", "copilot", out var whereStdOut, out _, out var whereExitCode) && whereExitCode == 0)
         {
-            var first = whereStdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                .Select(line => line.Trim())
-                .FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(first))
-                return first;
+            return SelectPreferredCliPath(whereStdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim()));
         }
     }
     else
     {
         if (TryRunProcess("which", "copilot", out var whichStdOut, out _, out var whichExitCode) && whichExitCode == 0)
         {
-            var first = whichStdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                .Select(line => line.Trim())
-                .FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(first))
-                return first;
+            return SelectPreferredCliPath(whichStdOut.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim()));
         }
     }
 
     return null;
 }
+
+static IEnumerable<CliCandidate> GetCopilotCliInstallCandidates()
+{
+    var candidates = new List<CliCandidate>();
+    var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    var seen = new HashSet<string>(comparer);
+
+    void AddFileCandidate(string? candidatePath, string source)
+    {
+        if (string.IsNullOrWhiteSpace(candidatePath))
+            return;
+
+        var fullPath = Path.GetFullPath(candidatePath);
+        if (seen.Add(fullPath))
+            candidates.Add(new CliCandidate(fullPath, source));
+    }
+
+    if (OperatingSystem.IsWindows())
+    {
+        void AddWindowsCommandCandidates(string? directoryPath, string source)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath))
+                return;
+
+            AddFileCandidate(Path.Combine(directoryPath, "copilot.exe"), source);
+            AddFileCandidate(Path.Combine(directoryPath, "copilot.cmd"), source);
+        }
+
+        var applicationData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var npmPrefix = Environment.GetEnvironmentVariable("NPM_CONFIG_PREFIX");
+        var pnpmHome = Environment.GetEnvironmentVariable("PNPM_HOME");
+        var chocolateyInstall = Environment.GetEnvironmentVariable("ChocolateyInstall");
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+
+        AddWindowsCommandCandidates(Path.Combine(applicationData, "npm"), "AppData npm");
+        AddWindowsCommandCandidates(Path.Combine(localApplicationData, "npm"), "LocalAppData npm");
+        AddWindowsCommandCandidates(npmPrefix, "NPM_CONFIG_PREFIX");
+        AddWindowsCommandCandidates(pnpmHome, "PNPM_HOME");
+        AddWindowsCommandCandidates(Path.Combine(localApplicationData, "pnpm"), "LocalAppData pnpm");
+        AddWindowsCommandCandidates(Path.Combine(localApplicationData, "Volta", "bin"), "Volta");
+        AddWindowsCommandCandidates(Path.Combine(userProfile, "scoop", "shims"), "Scoop");
+        if (!string.IsNullOrWhiteSpace(chocolateyInstall))
+            AddFileCandidate(Path.Combine(chocolateyInstall, "bin", "copilot.exe"), "Chocolatey");
+        AddFileCandidate(Path.Combine(programFiles, "GitHub Copilot CLI", "copilot.exe"), "Program Files");
+        AddFileCandidate(Path.Combine(programFiles, "GitHub Copilot", "copilot.exe"), "Program Files");
+        AddFileCandidate(Path.Combine(programFilesX86, "GitHub Copilot CLI", "copilot.exe"), "Program Files (x86)");
+        AddFileCandidate(Path.Combine(programFilesX86, "GitHub Copilot", "copilot.exe"), "Program Files (x86)");
+    }
+    else
+    {
+        void AddUnixCommandCandidate(string? directoryPath, string source)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath))
+                return;
+
+            AddFileCandidate(Path.Combine(directoryPath, "copilot"), source);
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var npmPrefix = Environment.GetEnvironmentVariable("NPM_CONFIG_PREFIX");
+        var pnpmHome = Environment.GetEnvironmentVariable("PNPM_HOME");
+
+        AddUnixCommandCandidate(Path.Combine(userProfile, ".npm-global", "bin"), "~/.npm-global/bin");
+        AddUnixCommandCandidate(Path.Combine(userProfile, ".local", "bin"), "~/.local/bin");
+        AddUnixCommandCandidate(Path.Combine(userProfile, ".volta", "bin"), "~/.volta/bin");
+        if (!string.IsNullOrWhiteSpace(npmPrefix))
+            AddUnixCommandCandidate(Path.Combine(npmPrefix, "bin"), "NPM_CONFIG_PREFIX");
+        AddUnixCommandCandidate(pnpmHome, "PNPM_HOME");
+        AddUnixCommandCandidate("/usr/local/bin", "/usr/local/bin");
+        AddUnixCommandCandidate("/opt/homebrew/bin", "/opt/homebrew/bin");
+        AddUnixCommandCandidate("/usr/bin", "/usr/bin");
+        AddUnixCommandCandidate("/snap/bin", "/snap/bin");
+    }
+
+    return candidates;
+}
+
+static string? SelectPreferredCliPath(IEnumerable<string> candidatePaths)
+{
+    return candidatePaths
+        .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+        .OrderBy(GetCliPathPriority)
+        .FirstOrDefault();
+}
+
+static int GetCliPathPriority(string candidatePath)
+{
+    if (!OperatingSystem.IsWindows())
+        return 0;
+
+    var extension = Path.GetExtension(candidatePath);
+    return extension.ToLowerInvariant() switch
+    {
+        ".exe" => 0,
+        ".cmd" => 1,
+        ".bat" => 2,
+        ".ps1" => 3,
+        "" => 4,
+        _ => 5
+    };
+}
+
+static string? TryFindBundledCopilotCli()
+{
+    var binaryName = OperatingSystem.IsWindows() ? "copilot.exe" : "copilot";
+    var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    var candidateRoots = new List<string> { Path.GetFullPath(AppContext.BaseDirectory) };
+    var baseDirectoryParent = Directory.GetParent(Path.GetFullPath(AppContext.BaseDirectory));
+    if (baseDirectoryParent != null)
+        candidateRoots.Add(baseDirectoryParent.FullName);
+
+    foreach (var root in candidateRoots.Distinct(comparer))
+    {
+        foreach (var runtimeId in GetBundledRuntimeIdentifiers())
+        {
+            var candidatePath = Path.Combine(root, "runtimes", runtimeId, "native", binaryName);
+            if (File.Exists(candidatePath))
+                return candidatePath;
+        }
+
+        var runtimesDirectory = Path.Combine(root, "runtimes");
+        if (!Directory.Exists(runtimesDirectory))
+            continue;
+
+        var discoveredPath = Directory.EnumerateFiles(runtimesDirectory, binaryName, SearchOption.AllDirectories)
+            .OrderBy(GetCliPathPriority)
+            .FirstOrDefault();
+
+        if (!string.IsNullOrWhiteSpace(discoveredPath))
+            return discoveredPath;
+    }
+
+    return null;
+}
+
+static IReadOnlyList<string> GetBundledRuntimeIdentifiers()
+{
+    var os = OperatingSystem.IsWindows()
+        ? "win"
+        : OperatingSystem.IsMacOS()
+            ? "osx"
+            : "linux";
+
+    var primaryArchitecture = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
+    var secondaryArchitecture = primaryArchitecture == "arm64" ? "x64" : "arm64";
+
+    return
+    [
+        $"{os}-{primaryArchitecture}",
+        $"{os}-{secondaryArchitecture}"
+    ];
+}
+
+static void WriteCliResolutionGuidance(string source)
+{
+    switch (source)
+    {
+        case "argument":
+            Console.WriteLine("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
+            break;
+        case "environment":
+            Console.WriteLine("   Verify COPILOT_CLI_PATH points to a valid Copilot CLI executable.");
+            break;
+        case "bundled":
+            Console.WriteLine("   Rebuild or reinstall the tool so the SDK-bundled Copilot CLI files are restored.");
+            break;
+        default:
+            Console.WriteLine("   Install GitHub Copilot CLI, set COPILOT_CLI_PATH, or pass --cli-path <path>.");
+            break;
+    }
+}
+
+readonly record struct CliLaunchConfig(string CliPath, string[]? CliArgs, string DisplayPath, string Source);
+
+readonly record struct CliCandidate(string Path, string Source);

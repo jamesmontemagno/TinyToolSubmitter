@@ -19,7 +19,7 @@ Options:
 - `--readme <path>` path to README file (skip auto-detection)
 - `--headless` skip interactive prompts
 - `--model <name>` Copilot model to use (default: `gpt-4.1`)
-- `--cli-path <path>` path to Copilot CLI executable
+- `--cli-path <path>` path to Copilot CLI executable (overrides auto-detection)
 - `--theme <name>` Tiny Tool Town page theme (or `none` for site default)
 - `--verbose` print Copilot CLI startup diagnostics
 
@@ -28,8 +28,17 @@ picker and prints a color swatch preview for each available theme.
 
 ## Requirements
 
-- Node.js 18+
-- GitHub Copilot CLI installed and authenticated (`copilot`)
+- Node.js 20+
+- GitHub Copilot access configured for the SDK call
+- Optional: a user-installed GitHub Copilot CLI if you want to override the SDK-bundled CLI
+
+CLI detection order:
+
+1. `--cli-path`
+2. `COPILOT_CLI_PATH`
+3. User-installed Copilot CLI on `PATH`
+4. Common install locations (npm, pnpm, Volta, Scoop, Chocolatey, Program Files, etc.)
+5. SDK-bundled Copilot CLI
 
 ## Release
 
