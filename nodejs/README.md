@@ -18,7 +18,7 @@ Options:
 
 - `--readme <path>` path to README file (skip auto-detection)
 - `--headless` skip interactive prompts
-- `--model <name>` Copilot model to use (default: `gpt-4.1`)
+- `--model <name>` Copilot model to use (default: `claude-haiku-4.5`)
 - `--cli-path <path>` path to Copilot CLI executable (overrides auto-detection)
 - `--theme <name>` Tiny Tool Town page theme (or `none` for site default)
 - `--verbose` print Copilot CLI startup diagnostics

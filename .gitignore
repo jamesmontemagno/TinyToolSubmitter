@@ -1,2 +1,7 @@
 src/bin/
 src/obj/
+nodejs/node_modules/
+nodejs/dist/
+.dotnet-home/
+.tmp/
+/package-lock.json

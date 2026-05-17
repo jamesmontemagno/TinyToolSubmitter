@@ -4,6 +4,8 @@ using GitHub.Copilot.SDK;
 using Spectre.Console;
 using TinyToolSubmitter;
 
+const string RecommendedModelId = "claude-haiku-4.5";
+
 // --- Parse CLI flags ---
 var flagArgs = args.Where(a => a.StartsWith("--") || a.StartsWith("-")).ToList();
 var positionalArgs = args.Where(a => !a.StartsWith("-")).ToList();
@@ -221,7 +223,7 @@ try
     }
     else if (headless)
     {
-        selectedModel = "gpt-4.1";
+        selectedModel = RecommendedModelId;
     }
     else
     {
@@ -232,8 +234,15 @@ try
         var models = await client.ListModelsAsync();
         if (models != null && models.Count > 0)
         {
-            var defaultIndex = models.FindIndex(m =>
-                m.Id.Equals("gpt-4.1", StringComparison.OrdinalIgnoreCase));
+            var defaultIndex = -1;
+            for (var i = 0; i < models.Count; i++)
+            {
+                if (models[i].Id.Equals(RecommendedModelId, StringComparison.OrdinalIgnoreCase))
+                {
+                    defaultIndex = i;
+                    break;
+                }
+            }
             if (defaultIndex < 0) defaultIndex = 0;
 
             var orderedModels = models
@@ -256,7 +265,7 @@ try
         }
         else
         {
-            selectedModel = "gpt-4.1";
+            selectedModel = RecommendedModelId;
         }
     }
 

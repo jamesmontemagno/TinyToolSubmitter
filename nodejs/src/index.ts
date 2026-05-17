@@ -52,6 +52,8 @@ const THEME_PALETTES: Array<{ name: string; colors: [string, string, string, str
     { name: "retro", colors: ["#1A1200", "#2A1F00", "#FFB000", "#FF8C00"] },
 ];
 
+const RECOMMENDED_MODEL_ID = "claude-haiku-4.5";
+
 // --- Parse CLI flags ---
 const args = process.argv.slice(2);
 const flagArgs = args.filter((a) => a.startsWith("-"));
@@ -218,14 +220,14 @@ try {
     if (flagModelName) {
         selectedModel = flagModelName;
     } else if (headless) {
-        selectedModel = "gpt-4.1";
+        selectedModel = RECOMMENDED_MODEL_ID;
     } else {
         console.log("\x1b[90m   Fetching available models...\x1b[0m");
         try {
             const models = await client.listModels();
             if (models && models.length > 0) {
                 const defaultModel = models.find((m: { id: string }) =>
-                    m.id.toLowerCase() === "gpt-4.1"
+                    m.id.toLowerCase() === RECOMMENDED_MODEL_ID
                 ) || models[0];
 
                 const choices = models.map((m: { id: string; name: string }) => ({
@@ -243,10 +245,10 @@ try {
                     choices,
                 });
             } else {
-                selectedModel = "gpt-4.1";
+                selectedModel = RECOMMENDED_MODEL_ID;
             }
         } catch {
-            selectedModel = "gpt-4.1";
+            selectedModel = RECOMMENDED_MODEL_ID;
         }
     }
 

@@ -113,7 +113,7 @@ Options:
 tiny-tool-submit [path-to-repo]
 	--readme <path>     Path to README file (skip auto-detection)
 	--headless          Skip interactive prompts, open URL directly
-	--model <name>      Copilot model to use (default: gpt-4.1)
+	--model <name>      Copilot model to use (default: claude-haiku-4.5)
 	--cli-path <path>   Path to Copilot CLI executable (overrides auto-detection)
 	--theme <name>      Tiny Tool Town page theme (or 'none' for site default)
 	--verbose           Print Copilot CLI startup diagnostics
