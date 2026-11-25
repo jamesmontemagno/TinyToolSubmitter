@@ -42,6 +42,7 @@ jobs:
             --configuration Release \
             --output ./artifacts \
             --no-build \
+            -p:NoDefaultExcludes=true \
             -p:Version=${{ steps.version.outputs.VERSION }}
 
       - name: Push to NuGet.org

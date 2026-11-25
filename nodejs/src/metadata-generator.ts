@@ -1,4 +1,4 @@
-import type { CopilotSession } from "@github/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 import type { ToolMetadata } from "./issue-url-builder.js";
 
 /**

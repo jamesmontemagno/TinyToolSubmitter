@@ -1,6 +1,6 @@
 # tiny-tool-submitter
 
-CLI tool to help submit your project to Tiny Tool Town using the GitHub Copilot SDK.
+CLI tool to help submit your project to Tiny Tool Town using the Microsoft Copilot SDK.
 
 ## Install
 
@@ -19,26 +19,24 @@ Options:
 - `--readme <path>` path to README file (skip auto-detection)
 - `--headless` skip interactive prompts
 - `--model <name>` Copilot model to use (default: `claude-haiku-4.5`)
-- `--cli-path <path>` path to Copilot CLI executable (overrides auto-detection)
+- `--cli-path <path>` path to a compatible Copilot runtime executable
 - `--theme <name>` Tiny Tool Town page theme (or `none` for site default)
-- `--verbose` print Copilot CLI startup diagnostics
+- `--verbose` print Copilot runtime startup diagnostics
 
 In interactive mode, the CLI includes Tiny Tool Town's optional page `theme`
 picker and prints a color swatch preview for each available theme.
 
 ## Requirements
 
-- Node.js 20+
+- Node.js `^20.19.0` or `>=22.12.0`
 - GitHub Copilot access configured for the SDK call
-- Optional: a user-installed GitHub Copilot CLI if you want to override the SDK-bundled CLI
+- No separate Copilot CLI install is required; the SDK supplies its bundled runtime
 
-CLI detection order:
+Runtime selection order:
 
 1. `--cli-path`
 2. `COPILOT_CLI_PATH`
-3. User-installed Copilot CLI on `PATH`
-4. Common install locations (npm, pnpm, Volta, Scoop, Chocolatey, Program Files, etc.)
-5. SDK-bundled Copilot CLI
+3. Microsoft Copilot SDK's bundled runtime (in-process by default)
 
 ## Release
 

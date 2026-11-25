@@ -1,4 +1,4 @@
-using GitHub.Copilot.SDK;
+using Microsoft.Copilot;
 using System.Text;
 using System.Text.Json;
 
@@ -104,7 +104,7 @@ README content:
         var result = new StringBuilder();
         var done = new TaskCompletionSource();
 
-        var subscription = session.On(evt =>
+        var subscription = session.On<SessionEvent>(evt =>
         {
             switch (evt)
             {

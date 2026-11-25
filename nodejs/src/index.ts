@@ -2,9 +2,9 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync, execSync } from "child_process";
-import { fileURLToPath } from "url";
-import { CopilotClient, approveAll } from "@github/copilot-sdk";
+import { execSync } from "child_process";
+import { CopilotClient, RuntimeConnection, approveAll } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "@microsoft/copilot-sdk";
 import { select, confirm, input } from "@inquirer/prompts";
 import {
     findReadme,
@@ -18,8 +18,6 @@ import {
 import { generateMetadata } from "./metadata-generator.js";
 import { buildIssueUrl } from "./issue-url-builder.js";
 import type { ToolMetadata } from "./issue-url-builder.js";
-
-const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const THEME_OPTIONS = [
     "None (site default)",
@@ -54,6 +52,12 @@ const THEME_PALETTES: Array<{ name: string; colors: [string, string, string, str
 
 const RECOMMENDED_MODEL_ID = "claude-haiku-4.5";
 
+class CliExitError extends Error {
+    constructor(readonly exitCode: number) {
+        super();
+    }
+}
+
 // --- Parse CLI flags ---
 const args = process.argv.slice(2);
 const flagArgs = args.filter((a) => a.startsWith("-"));
@@ -74,7 +78,7 @@ const flagThemeName = getFlagValue("--theme");
 
 console.log("\x1b[36m╔══════════════════════════════════════════════════════════════╗");
 console.log("║       Tiny Tool Town — Submission Helper 🏘️📋                 ║");
-console.log("║       Powered by GitHub Copilot SDK (Node.js)                 ║");
+console.log("║       Powered by Microsoft Copilot SDK (Node.js)             ║");
 console.log("╚══════════════════════════════════════════════════════════════╝\x1b[0m");
 console.log();
 
@@ -164,28 +168,23 @@ console.log("\x1b[0m");
 console.log("🤖 Starting Copilot to analyze your README...");
 
 let client: CopilotClient | null = null;
+let session: CopilotSession | null = null;
 
 try {
     const cliLaunch = resolveCliLaunch(flagCliPath);
 
     if (verbose) {
-        console.log(`\x1b[90m   Copilot CLI path: ${cliLaunch.displayPath} (${cliLaunch.source})\x1b[0m`);
-    }
-
-    const versionCheck = tryRunCliCommand(cliLaunch, ["--version"]);
-    if (!versionCheck.ok) {
-        console.error(`\x1b[31m❌ Failed to execute GitHub Copilot CLI at '${cliLaunch.displayPath}'.\x1b[0m`);
-        printCliResolutionGuidance(cliLaunch.source);
-        if (versionCheck.stderr) {
-            console.log(`   ${versionCheck.stderr}`);
-        }
-        process.exit(1);
+        console.log(`\x1b[90m   Copilot runtime: ${cliLaunch.displayPath} (${cliLaunch.source})\x1b[0m`);
     }
 
     client = new CopilotClient({
-        cliPath: cliLaunch.cliPath,
-        cliArgs: cliLaunch.cliArgs,
-        autoStart: false,
+        mode: "coding-agent",
+        runtime: cliLaunch.cliPath
+            ? RuntimeConnection.forSpawnedStdio({
+                path: cliLaunch.cliPath,
+                args: cliLaunch.cliArgs,
+            })
+            : undefined,
     });
 
     try {
@@ -193,27 +192,19 @@ try {
     } catch (ex: unknown) {
         const msg = ex instanceof Error ? ex.message : String(ex);
         if (msg.includes("not found") || msg.includes("No such file")) {
-            console.error(`\x1b[31m❌ GitHub Copilot CLI was not found at '${cliLaunch.displayPath}'.\x1b[0m`);
+            console.error(`\x1b[31m❌ Copilot runtime was not found at '${cliLaunch.displayPath}'.\x1b[0m`);
             printCliResolutionGuidance(cliLaunch.source);
         } else {
-            console.error(`\x1b[31m❌ Could not connect to GitHub Copilot CLI.\x1b[0m`);
-            console.log("   Try: `copilot --version` and `copilot auth status`.");
+            console.error("\x1b[31m❌ Could not start the Copilot runtime.\x1b[0m");
+            if (cliLaunch.cliPath) {
+                console.log("   Try: `copilot --version` and `copilot auth status`.");
+            }
             if (verbose) console.log(`   Error: ${msg}`);
         }
-        process.exit(1);
+        throw new CliExitError(1);
     }
 
     console.log("\x1b[32m✅ Copilot client started\x1b[0m");
-
-    if (verbose) {
-        console.log(`\x1b[90m   copilot --version: ${versionCheck.stdout}\x1b[0m`);
-
-        const authCheck = tryRunCliCommand(cliLaunch, ["auth", "status"]);
-        const authText = authCheck.stdout || authCheck.stderr;
-        if (authText) {
-            console.log(`\x1b[${authCheck.ok ? "90" : "33"}m   copilot auth status (exit ${authCheck.exitCode}): ${authText}\x1b[0m`);
-        }
-    }
 
     // Model selection
     let selectedModel: string;
@@ -254,11 +245,11 @@ try {
 
     console.log(`🤖 Using model: ${selectedModel}\n`);
 
-    const session = await client.createSession({
+    session = await client.createSession({
         model: selectedModel,
-        streaming: true,
-        infiniteSessions: { enabled: false },
-        onPermissionRequest: approveAll,
+        permissions: {
+            onRequest: approveAll,
+        },
     });
 
     console.log("\x1b[90m   Analyzing README with AI...\x1b[0m");
@@ -266,7 +257,7 @@ try {
 
     if (!metadata) {
         console.error("\x1b[31m❌ Failed to generate metadata from README.\x1b[0m");
-        process.exit(1);
+        throw new CliExitError(1);
     }
 
     // Fill in detected values
@@ -283,7 +274,7 @@ try {
         if (parsedTheme === undefined && !isNoThemeFlagValue(flagThemeName)) {
             console.error(`\x1b[31m❌ Invalid theme '${flagThemeName}'.\x1b[0m`);
             console.log(`   Valid values: ${getThemeFlagValues().join(", ")}`);
-            process.exit(1);
+            throw new CliExitError(1);
         }
 
         metadata.theme = parsedTheme;
@@ -370,25 +361,34 @@ try {
     }
 
     console.log("\n🏘️  Thanks for submitting to Tiny Tool Town!");
-
-    await session.destroy();
-    await client.stop();
-    process.exit(0);
 } catch (ex: unknown) {
-    if (ex instanceof Error && ex.message.includes("cancelled")) {
+    if (ex instanceof CliExitError) {
+        process.exitCode = ex.exitCode;
+    } else if (ex instanceof Error && ex.message.includes("cancelled")) {
         console.log("\n\x1b[33m⚠️ Cancelled by user.\x1b[0m");
-        process.exit(0);
+    } else {
+        const msg = ex instanceof Error ? ex.message : String(ex);
+        console.error(`\n\x1b[31m❌ Fatal error: ${msg}\x1b[0m`);
+        process.exitCode = 1;
+    }
+} finally {
+    if (session) {
+        try {
+            await session.disconnect();
+        } catch (ex: unknown) {
+            if (verbose) {
+                console.error(`   Session cleanup failed: ${ex instanceof Error ? ex.message : String(ex)}`);
+            }
+        }
     }
 
-    const msg = ex instanceof Error ? ex.message : String(ex);
-    console.error(`\n\x1b[31m❌ Fatal error: ${msg}\x1b[0m`);
-    process.exit(1);
-} finally {
     if (client) {
         try {
             await client.stop();
-        } catch {
-            // ignore
+        } catch (ex: unknown) {
+            if (verbose) {
+                console.error(`   Client cleanup failed: ${ex instanceof Error ? ex.message : String(ex)}`);
+            }
         }
     }
     console.log("\n🛑 Done.");
@@ -529,22 +529,10 @@ function isReadmeCandidate(fileName: string): boolean {
 }
 
 type CliLaunchConfig = {
-    cliPath: string;
+    cliPath?: string;
     cliArgs?: string[];
     displayPath: string;
     source: string;
-};
-
-type CliCandidate = {
-    path: string;
-    source: string;
-};
-
-type CliCommandResult = {
-    ok: boolean;
-    stdout: string;
-    stderr: string;
-    exitCode: number;
 };
 
 function resolveCliLaunch(explicitCliPath?: string): CliLaunchConfig {
@@ -556,17 +544,10 @@ function resolveCliLaunch(explicitCliPath?: string): CliLaunchConfig {
         return createCliLaunchConfig(process.env.COPILOT_CLI_PATH.trim(), "environment");
     }
 
-    const userInstalledCli = tryFindUserInstalledCopilotCli();
-    if (userInstalledCli) {
-        return createCliLaunchConfig(userInstalledCli.path, userInstalledCli.source);
-    }
-
-    const bundledCli = tryFindBundledCliPath();
-    if (bundledCli) {
-        return createCliLaunchConfig(bundledCli, "bundled");
-    }
-
-    return createCliLaunchConfig("copilot", "default");
+    return {
+        displayPath: "SDK-managed bundled runtime",
+        source: "default",
+    };
 }
 
 function createCliLaunchConfig(discoveredPath: string, source: string): CliLaunchConfig {
@@ -598,171 +579,16 @@ function createCliLaunchConfig(discoveredPath: string, source: string): CliLaunc
     };
 }
 
-function tryRunCliCommand(cliLaunch: CliLaunchConfig, args: string[]): CliCommandResult {
-    try {
-        const stdout = execFileSync(
-            cliLaunch.cliPath,
-            [...(cliLaunch.cliArgs ?? []), ...args],
-            { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
-        ).trim();
-
-        return { ok: true, stdout, stderr: "", exitCode: 0 };
-    } catch (error: unknown) {
-        const commandError = error as {
-            stdout?: string | Buffer;
-            stderr?: string | Buffer;
-            status?: number | null;
-        };
-
-        return {
-            ok: false,
-            stdout: normalizeExecOutput(commandError.stdout),
-            stderr: normalizeExecOutput(commandError.stderr),
-            exitCode: typeof commandError.status === "number" ? commandError.status : -1,
-        };
-    }
-}
-
-function normalizeExecOutput(output: string | Buffer | undefined): string {
-    if (!output) return "";
-    return output.toString().trim();
-}
-
-function tryFindUserInstalledCopilotCli(): CliCandidate | undefined {
-    const detectedCli = tryFindCopilotCliOnPath();
-    if (detectedCli) {
-        return { path: detectedCli, source: "PATH" };
-    }
-
-    return getCopilotCliInstallCandidates().find((candidate) => fs.existsSync(candidate.path));
-}
-
-function tryFindCopilotCliOnPath(): string | undefined {
-    try {
-        const command = process.platform === "win32" ? "where" : "which";
-        const result = execSync(`${command} copilot`, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-        return selectPreferredCliPath(result.split(/\r?\n/).map((line) => line.trim()));
-    } catch {
-        return undefined;
-    }
-}
-
-function getCopilotCliInstallCandidates(): CliCandidate[] {
-    const seen = new Set<string>();
-    const candidates: CliCandidate[] = [];
-
-    const addCandidate = (candidatePath: string | undefined, source: string) => {
-        if (!candidatePath) return;
-        const fullPath = path.resolve(candidatePath);
-        const dedupeKey = process.platform === "win32" ? fullPath.toLowerCase() : fullPath;
-        if (seen.has(dedupeKey)) return;
-        seen.add(dedupeKey);
-        candidates.push({ path: fullPath, source });
-    };
-
-    if (process.platform === "win32") {
-        const addWindowsCommandCandidates = (directoryPath: string | undefined, source: string) => {
-            if (!directoryPath) return;
-            addCandidate(path.join(directoryPath, "copilot.exe"), source);
-            addCandidate(path.join(directoryPath, "copilot.cmd"), source);
-        };
-
-        addWindowsCommandCandidates(process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : undefined, "AppData npm");
-        addWindowsCommandCandidates(process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "npm") : undefined, "LocalAppData npm");
-        addWindowsCommandCandidates(process.env.NPM_CONFIG_PREFIX, "NPM_CONFIG_PREFIX");
-        addWindowsCommandCandidates(process.env.PNPM_HOME, "PNPM_HOME");
-        addWindowsCommandCandidates(process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "pnpm") : undefined, "LocalAppData pnpm");
-        addWindowsCommandCandidates(process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Volta", "bin") : undefined, "Volta");
-        addWindowsCommandCandidates(process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "scoop", "shims") : undefined, "Scoop");
-        addCandidate(process.env.ChocolateyInstall ? path.join(process.env.ChocolateyInstall, "bin", "copilot.exe") : undefined, "Chocolatey");
-        addCandidate(process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "GitHub Copilot CLI", "copilot.exe") : undefined, "Program Files");
-        addCandidate(process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "GitHub Copilot", "copilot.exe") : undefined, "Program Files");
-        addCandidate(process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "GitHub Copilot CLI", "copilot.exe") : undefined, "Program Files (x86)");
-        addCandidate(process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "GitHub Copilot", "copilot.exe") : undefined, "Program Files (x86)");
-    } else {
-        const addUnixCommandCandidate = (directoryPath: string | undefined, source: string) => {
-            if (!directoryPath) return;
-            addCandidate(path.join(directoryPath, "copilot"), source);
-        };
-
-        addUnixCommandCandidate(process.env.HOME ? path.join(process.env.HOME, ".npm-global", "bin") : undefined, "~/.npm-global/bin");
-        addUnixCommandCandidate(process.env.HOME ? path.join(process.env.HOME, ".local", "bin") : undefined, "~/.local/bin");
-        addUnixCommandCandidate(process.env.HOME ? path.join(process.env.HOME, ".volta", "bin") : undefined, "~/.volta/bin");
-        addUnixCommandCandidate(process.env.NPM_CONFIG_PREFIX ? path.join(process.env.NPM_CONFIG_PREFIX, "bin") : undefined, "NPM_CONFIG_PREFIX");
-        addUnixCommandCandidate(process.env.PNPM_HOME, "PNPM_HOME");
-        addUnixCommandCandidate("/usr/local/bin", "/usr/local/bin");
-        addUnixCommandCandidate("/opt/homebrew/bin", "/opt/homebrew/bin");
-        addUnixCommandCandidate("/usr/bin", "/usr/bin");
-        addUnixCommandCandidate("/snap/bin", "/snap/bin");
-    }
-
-    return candidates;
-}
-
-function selectPreferredCliPath(candidatePaths: string[]): string | undefined {
-    return candidatePaths
-        .filter((candidatePath) => candidatePath && fs.existsSync(candidatePath))
-        .sort((left, right) => getCliPathPriority(left) - getCliPathPriority(right))[0];
-}
-
-function getCliPathPriority(candidatePath: string): number {
-    if (process.platform !== "win32") return 0;
-
-    switch (path.extname(candidatePath).toLowerCase()) {
-        case ".exe": return 0;
-        case ".cmd": return 1;
-        case ".bat": return 2;
-        case ".ps1": return 3;
-        case "": return 4;
-        default: return 5;
-    }
-}
-
-function tryFindBundledCliPath(): string | undefined {
-    const binaryName = process.platform === "win32" ? "copilot.exe" : "copilot";
-    const bundledPackageName = getBundledCliPackageName();
-    const packageCandidate = bundledPackageName
-        ? path.join(PROJECT_ROOT, "node_modules", ...bundledPackageName.split("/"), binaryName)
-        : undefined;
-
-    if (packageCandidate && fs.existsSync(packageCandidate)) {
-        return packageCandidate;
-    }
-
-    const shimCandidate = path.join(PROJECT_ROOT, "node_modules", ".bin", process.platform === "win32" ? "copilot.cmd" : "copilot");
-    if (fs.existsSync(shimCandidate)) {
-        return shimCandidate;
-    }
-
-    return undefined;
-}
-
-function getBundledCliPackageName(): string | undefined {
-    const key = `${process.platform}:${process.arch}`;
-    switch (key) {
-        case "win32:x64": return "@github/copilot-win32-x64";
-        case "win32:arm64": return "@github/copilot-win32-arm64";
-        case "linux:x64": return "@github/copilot-linux-x64";
-        case "linux:arm64": return "@github/copilot-linux-arm64";
-        case "darwin:x64": return "@github/copilot-darwin-x64";
-        case "darwin:arm64": return "@github/copilot-darwin-arm64";
-        default: return undefined;
-    }
-}
-
 function printCliResolutionGuidance(source: string): void {
     switch (source) {
         case "argument":
-            console.log("   Verify the provided --cli-path value points to a valid Copilot CLI executable.");
+            console.log("   Verify the provided --cli-path value points to a compatible Copilot runtime executable.");
             break;
         case "environment":
-            console.log("   Verify COPILOT_CLI_PATH points to a valid Copilot CLI executable.");
-            break;
-        case "bundled":
-            console.log("   Reinstall dependencies so the SDK-bundled Copilot CLI is restored locally.");
+            console.log("   Verify COPILOT_CLI_PATH points to a compatible Copilot runtime executable.");
             break;
         default:
-            console.log("   Install GitHub Copilot CLI, set COPILOT_CLI_PATH, or pass --cli-path <path>.");
+            console.log("   Reinstall dependencies so the SDK-managed Copilot runtime is restored locally.");
             break;
     }
 }

@@ -13,8 +13,8 @@ Standalone repo for the Tiny Tool Town submitter CLI.
 Prerequisites:
 
 - .NET 10 SDK
-- GitHub Copilot access configured for the SDK call
-- GitHub Copilot CLI installed somewhere on your machine, or rely on the SDK-bundled CLI fallback
+- GitHub Copilot access configured for the Microsoft Copilot SDK call
+- No separate Copilot CLI install is required; the SDK supplies its bundled runtime
 
 Run directly with dnx:
 
@@ -60,7 +60,7 @@ dotnet run --project src/TinyToolSubmitter.csproj -- [path-to-repo]
 
 ### Node.js
 
-Requires Node.js 20+.
+Requires Node.js `^20.19.0` or `>=22.12.0`.
 
 ```bash
 cd nodejs
@@ -114,18 +114,16 @@ tiny-tool-submit [path-to-repo]
 	--readme <path>     Path to README file (skip auto-detection)
 	--headless          Skip interactive prompts, open URL directly
 	--model <name>      Copilot model to use (default: claude-haiku-4.5)
-	--cli-path <path>   Path to Copilot CLI executable (overrides auto-detection)
+	--cli-path <path>   Path to a compatible Copilot runtime executable
 	--theme <name>      Tiny Tool Town page theme (or 'none' for site default)
-	--verbose           Print Copilot CLI startup diagnostics
+	--verbose           Print Copilot runtime startup diagnostics
 ```
 
-CLI detection order:
+Runtime selection order:
 
 1. `--cli-path`
 2. `COPILOT_CLI_PATH`
-3. User-installed Copilot CLI on `PATH`
-4. Common install locations (npm, pnpm, Volta, Scoop, Chocolatey, Program Files, etc.)
-5. SDK-bundled Copilot CLI
+3. Microsoft Copilot SDK's bundled runtime (in-process by default)
 
 Both the .NET and Node CLIs now support Tiny Tool Town's optional `theme` field.
 In interactive mode, they show a theme picker and a terminal color swatch preview
