@@ -45,7 +45,7 @@ This package is published by GitHub Actions from this repository:
 - Workflow: `/.github/workflows/publish-npm.yml`
 - Tag trigger: `npm-v*` (example: `npm-v1.0.1`)
 - Manual trigger: `workflow_dispatch` with `version` input
-- Required secret: `NPM_TOKEN`
+- Authentication: npm trusted publisher for `jamesmontemagno/TinyToolSubmitter` and `publish-npm.yml`
 
 Tag-based release example:
 
