@@ -95,6 +95,7 @@ This repo includes tag-triggered workflows for both NuGet and npm:
 ### .NET / NuGet
 - Workflow: `.github/workflows/release-submitter.yml`
 - Trigger tag format: `submitter-v*` (example: `submitter-v1.0.0`)
+- Also supports `workflow_dispatch` with a version input
 - Authentication: NuGet.org GitHub trusted-publishing policy for `jamesmontemagno/TinyToolSubmitter` and `release-submitter.yml`
 
 ### Node.js / npm
