@@ -95,15 +95,20 @@ This repo includes tag-triggered workflows for both NuGet and npm:
 ### .NET / NuGet
 - Workflow: `.github/workflows/release-submitter.yml`
 - Trigger tag format: `submitter-v*` (example: `submitter-v1.0.0`)
-- Required secret: `NUGET_API_KEY`
+- Authentication: NuGet.org GitHub trusted-publishing policy for `jamesmontemagno/TinyToolSubmitter` and `release-submitter.yml`
 
 ### Node.js / npm
 - Workflow: `.github/workflows/publish-npm.yml`
 - Trigger tag format: `npm-v*` (example: `npm-v1.0.0`)
 - Also supports `workflow_dispatch` with a version input
-- Required secret: `NPM_TOKEN`
+- Authentication: npm trusted publisher for `jamesmontemagno/TinyToolSubmitter` and `publish-npm.yml`
 
 Both workflows build, publish, and handle versioning automatically.
+
+Trusted-publishing policies must be configured once for the package owners:
+
+- NuGet.org: repository owner `jamesmontemagno`, repository `TinyToolSubmitter`, workflow file `release-submitter.yml`, package owner `JamesMontemagno`, and no GitHub environment.
+- npm: GitHub Actions publisher for owner `jamesmontemagno`, repository `TinyToolSubmitter`, workflow file `publish-npm.yml`, and no environment.
 
 ## Tool Usage
 
